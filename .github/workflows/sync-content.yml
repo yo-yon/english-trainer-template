@@ -1,0 +1,54 @@
+# 教材の反映：main に取り込まれた単語・文（src/seed/words.json・sentences.json）を Table に反映する。
+# 復習状態・設定・発音記録には触れない。
+name: Sync content
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/seed/words.json
+      - src/seed/sentences.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # シークレットが無い場合（テンプレートから作った直後など）は、失敗させずにスキップする
+      - name: シークレットの確認
+        id: check
+        env:
+          TABLE_ACCOUNT_URL: ${{ secrets.TABLE_ACCOUNT_URL }}
+          TABLE_SAS: ${{ secrets.TABLE_SAS }}
+        run: |
+          if [ -n "$TABLE_ACCOUNT_URL" ] && [ -n "$TABLE_SAS" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::シークレット TABLE_ACCOUNT_URL / TABLE_SAS が未設定のため、スキップしました（設定する場合は docs/FEEDBACK-LOOP.md）"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.check.outputs.ok == 'true'
+
+      - uses: actions/setup-node@v7
+        if: steps.check.outputs.ok == 'true'
+        with:
+          node-version: 22
+
+      - name: 依存パッケージを入れる
+        if: steps.check.outputs.ok == 'true'
+        working-directory: tools
+        run: npm install --no-audit --no-fund
+
+      - name: 教材を Table に反映
+        if: steps.check.outputs.ok == 'true'
+        working-directory: tools
+        env:
+          TABLE_ACCOUNT_URL: ${{ secrets.TABLE_ACCOUNT_URL }}
+          TABLE_SAS: ${{ secrets.TABLE_SAS }}
+        run: node sync-content.mjs

@@ -1,0 +1,15 @@
+{
+  "name": "english-trainer-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "週次レポート・教材の反映・フィードバックの対応済み化（GitHub Actions から実行）",
+  "scripts": {
+    "report": "node report.mjs",
+    "sync-content": "node sync-content.mjs",
+    "close-feedback": "node close-feedback.mjs"
+  },
+  "dependencies": {
+    "@azure/data-tables": "^13.3.2"
+  }
+}

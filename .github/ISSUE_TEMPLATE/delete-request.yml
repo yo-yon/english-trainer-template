@@ -1,0 +1,31 @@
+name: 送ったフィードバックの削除依頼
+description: 作者に送ったフィードバック（👎・ご意見）を消してほしいとき
+title: "フィードバックの削除依頼"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        作者に送ったフィードバックを、作者の受付から削除します。
+        **この Issue は誰でも見られます。** 端末 ID の先頭8文字だけを書き、コメントの本文や名前、メールアドレスは書かないでください。
+  - type: input
+    id: instance
+    attributes:
+      label: 端末 ID（先頭8文字）
+      description: アプリの「一覧」タブの設定欄に表示されています（例：3f2a9c1e）
+      placeholder: "3f2a9c1e"
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 削除する範囲
+      options:
+        - この端末 ID から送ったものすべて
+        - 一部（おおよその日付を下に書く）
+    validations:
+      required: true
+  - type: input
+    id: when
+    attributes:
+      label: おおよその日付（一部のときだけ）
+      placeholder: "2026年11月上旬"

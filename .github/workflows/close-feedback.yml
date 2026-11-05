@@ -1,0 +1,61 @@
+# フィードバックの対応済み化：取り込まれたプルリクエストの本文にある
+# 「Fixes-feedback: <ID>, <ID>」のフィードバックを、Table 上で「対応済み」にする。
+name: Close feedback
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  # 手動：プルリクエスト以外で対応したフィードバックを「対応済み」にする（ID は週次レポートの表から）
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "対応済みにするフィードバックの ID（カンマ区切り）"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  close:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && contains(github.event.pull_request.body, 'Fixes-feedback:'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # シークレットが無い場合（テンプレートから作った直後など）は、失敗させずにスキップする
+      - name: シークレットの確認
+        id: check
+        env:
+          TABLE_ACCOUNT_URL: ${{ secrets.TABLE_ACCOUNT_URL }}
+          TABLE_SAS: ${{ secrets.TABLE_SAS }}
+        run: |
+          if [ -n "$TABLE_ACCOUNT_URL" ] && [ -n "$TABLE_SAS" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::シークレット TABLE_ACCOUNT_URL / TABLE_SAS が未設定のため、スキップしました（設定する場合は docs/FEEDBACK-LOOP.md）"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.check.outputs.ok == 'true'
+
+      - uses: actions/setup-node@v7
+        if: steps.check.outputs.ok == 'true'
+        with:
+          node-version: 22
+
+      - name: 依存パッケージを入れる
+        if: steps.check.outputs.ok == 'true'
+        working-directory: tools
+        run: npm install --no-audit --no-fund
+
+      - name: 対応済みにする
+        if: steps.check.outputs.ok == 'true'
+        working-directory: tools
+        env:
+          TABLE_ACCOUNT_URL: ${{ secrets.TABLE_ACCOUNT_URL }}
+          TABLE_SAS: ${{ secrets.TABLE_SAS }}
+          PR_BODY: "${{ github.event_name == 'workflow_dispatch' && format('Fixes-feedback: {0}', inputs.ids) || github.event.pull_request.body }}"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: node close-feedback.mjs

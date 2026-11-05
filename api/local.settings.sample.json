@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "STORAGE_CONNECTION_STRING": "<Storage アカウントの接続文字列>",
+    "TABLE_NAME": "learning",
+    "SPEECH_KEY": "<Speech リソースのキー>",
+    "SPEECH_REGION": "japaneast",
+    "FOUNDRY_ENDPOINT": "https://<リソース名>.openai.azure.com",
+    "FOUNDRY_API_KEY": "<Foundry リソースのキー>",
+    "FOUNDRY_DEPLOYMENT": "gpt-5.4-mini"
+  }
+}

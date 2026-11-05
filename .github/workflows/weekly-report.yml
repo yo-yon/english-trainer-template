@@ -1,0 +1,89 @@
+# 週次レポート：毎週日曜 21:17（日本時間）に、フィードバックと学習の集計を reports ブランチに書き出す。
+# reports ブランチへの書き込みなので、本番のデプロイ（main への push）は起きない。
+# Actions タブの「Run workflow」から手動でも実行できる。
+name: Weekly report
+
+on:
+  schedule:
+    - cron: "17 12 * * 0" # UTC。日曜 12:17 UTC = 日曜 21:17 日本時間（毎時0分は混み合うため少しずらす）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # シークレットが無い場合（テンプレートから作った直後など）は、失敗させずにスキップする
+      - name: シークレットの確認
+        id: check
+        env:
+          TABLE_ACCOUNT_URL: ${{ secrets.TABLE_ACCOUNT_URL }}
+          TABLE_SAS: ${{ secrets.TABLE_SAS }}
+        run: |
+          if [ -n "$TABLE_ACCOUNT_URL" ] && [ -n "$TABLE_SAS" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::シークレット TABLE_ACCOUNT_URL / TABLE_SAS が未設定のため、スキップしました（設定する場合は docs/FEEDBACK-LOOP.md）"
+          fi
+
+      - name: main を取得（スクリプト）
+        if: steps.check.outputs.ok == 'true'
+        uses: actions/checkout@v7
+        with:
+          path: main
+
+      # reports ブランチが無い（テンプレートから作った直後）ときは、ここで新しく作る
+      - name: reports ブランチを用意
+        if: steps.check.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir reports && cd reports
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch -q --depth 1 origin reports 2>/dev/null; then
+            git checkout -q -b reports FETCH_HEAD
+          else
+            git checkout -q --orphan reports
+            echo "reports ブランチを新しく作ります"
+          fi
+
+      - uses: actions/setup-node@v7
+        if: steps.check.outputs.ok == 'true'
+        with:
+          node-version: 22
+
+      - name: 依存パッケージを入れる
+        if: steps.check.outputs.ok == 'true'
+        working-directory: main/tools
+        run: npm install --no-audit --no-fund
+
+      - name: レポートを作成
+        if: steps.check.outputs.ok == 'true'
+        working-directory: main/tools
+        env:
+          TABLE_ACCOUNT_URL: ${{ secrets.TABLE_ACCOUNT_URL }}
+          TABLE_SAS: ${{ secrets.TABLE_SAS }}
+        run: node report.mjs "$GITHUB_WORKSPACE/reports/reports"
+
+      - name: reports ブランチに保存
+        if: steps.check.outputs.ok == 'true'
+        working-directory: reports
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -q -m "週次レポート $(TZ=Asia/Tokyo date +%Y-%m-%d)"
+            git push -q origin HEAD:reports
+          fi

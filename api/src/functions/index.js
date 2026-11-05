@@ -1,0 +1,280 @@
+const { app } = require("@azure/functions");
+const { requireOwner, listPartition, getOne, upsert, upsertMany, safeKey, bad, fail } = require("../lib");
+const share = require("../share");
+
+const KINDS = { word: "card-word", sentence: "card-sentence" };
+
+/* ---------- Speech の短期トークン（有効10分。9分間は使い回す） ---------- */
+let cachedToken = null; // { token, exp }
+app.http("speechToken", {
+  route: "speech-token",
+  methods: ["GET"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    const key = process.env.SPEECH_KEY;
+    const region = process.env.SPEECH_REGION;
+    if (!key || !region) return { status: 500, jsonBody: { error: "SPEECH_KEY / SPEECH_REGION が未設定です" } };
+    try {
+      if (!cachedToken || Date.now() > cachedToken.exp) {
+        const r = await fetch(`https://${region}.api.cognitive.microsoft.com/sts/v1.0/issueToken`, {
+          method: "POST",
+          headers: { "Ocp-Apim-Subscription-Key": key, "Content-Length": "0" },
+        });
+        if (!r.ok) {
+          context.error(`issueToken failed: ${r.status}`);
+          return { status: 502, jsonBody: { error: "token_failed" } };
+        }
+        cachedToken = { token: await r.text(), exp: Date.now() + 9 * 60 * 1000 };
+      }
+      return {
+        jsonBody: { token: cachedToken.token, region, expiresAt: cachedToken.exp, voice: process.env.TTS_VOICE || "en-US-AvaNeural" },
+        headers: { "Cache-Control": "no-store" },
+      };
+    } catch (e) {
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 起動時にまとめて読む（単語・文・復習状態・設定） ---------- */
+app.http("state", {
+  route: "state",
+  methods: ["GET"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      const [words, sentences, wordCards, sentenceCards, settings] = await Promise.all([
+        listPartition("word"),
+        listPartition("sentence"),
+        listPartition("card-word"),
+        listPartition("card-sentence"),
+        getOne("settings", "app"),
+      ]);
+      const toMap = (arr) => Object.fromEntries(arr.map(({ id, ...s }) => [id, s]));
+      return {
+        jsonBody: { words, sentences, cards: { word: toMap(wordCards), sentence: toMap(sentenceCards) }, settings: settings || {}, hub: { enabled: share.hubEnabled() } },
+        headers: { "Cache-Control": "no-store" },
+      };
+    } catch (e) {
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 復習状態の保存 ---------- */
+app.http("card", {
+  route: "card/{kind}/{id}",
+  methods: ["PUT"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    const pk = KINDS[request.params.kind];
+    if (!pk) return bad("kind");
+    try {
+      const b = await request.json();
+      const card = {
+        interval: Number(b.interval) || 0,
+        ease: Number(b.ease) || 2.5,
+        reps: Number(b.reps) || 0,
+        lapses: Number(b.lapses) || 0,
+        due: Number(b.due) || 0,
+        best: b.best != null ? Number(b.best) : undefined,
+      };
+      await upsert(pk, safeKey(request.params.id), card);
+      return { status: 204 };
+    } catch (e) {
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 設定（1日の新規数・クイズ成績など） ---------- */
+app.http("settings", {
+  route: "settings",
+  methods: ["PUT"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      const b = await request.json();
+      if (!b || typeof b !== "object" || JSON.stringify(b).length > 20000) return bad("settings");
+      await upsert("settings", "app", b);
+      return { status: 204 };
+    } catch (e) {
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 発音評価の結果（苦手な音の分析用に月ごとに保存） ---------- */
+const monthKey = (d = new Date()) => {
+  const j = new Date(d.getTime() + 9 * 3600 * 1000); // 日本時間で月を決める
+  return `attempt-${j.getUTCFullYear()}${String(j.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+app.http("attempts", {
+  route: "attempts",
+  methods: ["GET", "POST"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      if (request.method === "GET") {
+        const m = request.query.get("month");
+        const pk = m && /^\d{6}$/.test(m) ? `attempt-${m}` : monthKey();
+        const rows = await listPartition(pk);
+        return { jsonBody: rows.slice(0, 500) };
+      }
+      const b = await request.json();
+      if (!b || !b.sentenceId || JSON.stringify(b).length > 60000) return bad("attempt");
+      const rk = String(9e15 - Date.now()).padStart(16, "0"); // 新しい順に並ぶ
+      await upsert(monthKey(), rk, { ...b, at: new Date().toISOString() });
+      return { status: 201 };
+    } catch (e) {
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 意味の判定（Foundry の gpt-5.4-mini） ---------- */
+async function callLLM(messages) {
+  const ep = (process.env.FOUNDRY_ENDPOINT || "").replace(/\/+$/, "");
+  const key = process.env.FOUNDRY_API_KEY;
+  const model = process.env.FOUNDRY_DEPLOYMENT || "gpt-5.4-mini";
+  if (!ep || !key) throw Object.assign(new Error("FOUNDRY_ENDPOINT / FOUNDRY_API_KEY が未設定です"), { code: "no_llm" });
+  const body = { model, messages, response_format: { type: "json_object" }, max_completion_tokens: 400, reasoning_effort: "low" };
+  let r = await fetch(`${ep}/openai/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "api-key": key },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 400) {
+    // reasoning_effort に未対応のモデル・デプロイだった場合は外して再試行
+    delete body.reasoning_effort;
+    r = await fetch(`${ep}/openai/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": key },
+      body: JSON.stringify(body),
+    });
+  }
+  if (!r.ok) throw new Error(`LLM ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  const j = await r.json();
+  return JSON.parse(j.choices?.[0]?.message?.content || "{}");
+}
+
+app.http("judge", {
+  route: "judge",
+  methods: ["POST"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      const b = await request.json();
+      const clip = (s, n) => String(s || "").slice(0, n);
+      const answer = clip(b.answer, 200);
+      if (!b.word || !answer) return bad("judge");
+      const out = await callLLM([
+        {
+          role: "system",
+          content:
+            "あなたは英単語テストの採点者です。英単語の日本語訳として学習者の答えが正しいかを判定します。" +
+            "言い回しが違っても意味が同じなら正解、品詞の違い（「活用」と「活用する」など）も正解にします。" +
+            "意味がずれている、または別の語の意味なら不正解です。" +
+            '必ず {"correct": true|false, "comment": "日本語60文字以内の一言"} のJSONだけを返してください。',
+        },
+        {
+          role: "user",
+          content: `英単語: ${clip(b.word, 60)}（${clip(b.pos, 20)}）\n想定する意味: ${clip(b.meaning, 100)}\n例文: ${clip(b.example, 200)}\n学習者の答え: ${answer}`,
+        },
+      ]);
+      return { jsonBody: { correct: !!out.correct, comment: String(out.comment || "").slice(0, 120) } };
+    } catch (e) {
+      if (e.code === "no_llm") return { status: 503, jsonBody: { error: "no_llm" } };
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- フィードバック（👎・ご意見・要望） ---------- */
+const FB_KINDS = new Set(["content", "app"]);
+app.http("feedback", {
+  route: "feedback",
+  methods: ["GET", "POST"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      if (request.method === "GET") {
+        const rows = await listPartition("feedback");
+        return { jsonBody: rows.slice(0, 200), headers: { "Cache-Control": "no-store" } };
+      }
+      const b = await request.json();
+      const clip = (s, n) => (s == null ? "" : String(s).slice(0, n));
+      if (!b || !FB_KINDS.has(b.kind) || !b.category) return bad("feedback");
+      if (b.kind === "app" && !clip(b.comment, 1000).trim()) return bad("comment");
+      const item = {
+        kind: b.kind,                               // content = 教材・判定への👎 / app = 機能の要望・使い勝手・不具合
+        category: clip(b.category, 40),
+        targetType: clip(b.targetType, 20),         // word / sentence / quiz
+        targetId: clip(b.targetId, 100),
+        targetText: clip(b.targetText, 300),
+        // 判定結果など、そのときの状況（大きすぎるものは保存しない）
+        detail: b.detail && typeof b.detail === "object" && JSON.stringify(b.detail).length <= 2000 ? b.detail : undefined,
+        comment: clip(b.comment, 1000),
+        context: { tab: clip(b.context?.tab, 20), version: clip(b.context?.version, 20), device: clip(b.context?.device, 20) },
+        instanceId: clip(b.instanceId, 40),
+        status: "open",
+        at: new Date().toISOString(),
+      };
+      const rk = String(9e15 - Date.now()).padStart(16, "0");
+      // 本人が「作者にも送る」を選んだときだけ、作者の受付に転送する（初期設定は送らない）
+      if (b.share === true && share.hubEnabled()) {
+        item.share = await share.sendToHub(share.buildPayload(item, b.instanceId, b.context?.version));
+      }
+      await upsert("feedback", rk, item);
+      return { status: 201, jsonBody: { share: item.share ? item.share.status : "none" } };
+    } catch (e) {
+      if (e instanceof SyntaxError) return bad("feedback");
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 単語・文・復習状態の取り込み（初期データ投入・教材追加用） ---------- */
+app.http("import", {
+  route: "import",
+  methods: ["POST"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      const b = await request.json();
+      const arr = (x) => (Array.isArray(x) ? x.slice(0, 2000) : []);
+      const words = arr(b.words).filter((w) => w && w.id && w.word).map((w) => ({ ...w, id: safeKey(w.id) }));
+      const sentences = arr(b.sentences).filter((s) => s && s.id && s.text).map((s) => ({ ...s, id: safeKey(s.id) }));
+      const wc = Object.entries(b.wordCards || {}).map(([id, c]) => ({ id: safeKey(id), ...c }));
+      const sc = Object.entries(b.sentenceCards || {}).map(([id, c]) => ({ id: safeKey(id), ...c }));
+      await upsertMany("word", words);
+      await upsertMany("sentence", sentences);
+      await upsertMany("card-word", wc);
+      await upsertMany("card-sentence", sc);
+      if (b.settings && typeof b.settings === "object") {
+        const cur = (await getOne("settings", "app")) || {};
+        // 取り込みは明示的な操作なので移行データを優先。端末のランダムIDだけは今のものを残す
+        await upsert("settings", "app", { ...cur, ...b.settings, instanceId: cur.instanceId || b.settings.instanceId, imported: true });
+      }
+      return { jsonBody: { words: words.length, sentences: sentences.length, wordCards: wc.length, sentenceCards: sc.length } };
+    } catch (e) {
+      return fail(context, e);
+    }
+  },
+});

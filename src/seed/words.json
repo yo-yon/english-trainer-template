@@ -1,0 +1,420 @@
+[
+ {
+  "day": 1,
+  "example": "We can leverage agents to automate routine tasks.",
+  "ipa": "/ˈlɛvərɪdʒ/",
+  "meaning": "活用する",
+  "order": 1,
+  "pos": "動詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "LEV-er-age",
+  "stressNote": "最初の LEV を強く",
+  "synonyms": [
+   "utilize",
+   "make use of",
+   "take advantage of"
+  ],
+  "tip": "v は下唇を軽く噛む。語尾は「レッジ」ではなく「リッジ」に近い",
+  "translation": "定型業務の自動化にエージェントを活用できる。",
+  "word": "leverage",
+  "id": "leverage",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "Use a workflow when you need a deterministic result.",
+  "ipa": "/dɪˌtɝmɪˈnɪstɪk/",
+  "meaning": "毎回同じ結果になる・決定的な",
+  "order": 2,
+  "pos": "形容詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "de-ter-mi-NIS-tic",
+  "stressNote": "NIS を強く",
+  "synonyms": [
+   "predictable",
+   "consistent",
+   "rule-based"
+  ],
+  "tip": "ter は舌を丸める r の音",
+  "translation": "毎回同じ結果が必要なときはワークフローを使う。",
+  "word": "deterministic",
+  "id": "deterministic",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "Agents are good at handling ambiguous requests.",
+  "ipa": "/æmˈbɪɡjuəs/",
+  "meaning": "曖昧な（複数の意味に取れる）",
+  "order": 3,
+  "pos": "形容詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "am-BIG-u-ous",
+  "stressNote": "BIG を強く",
+  "synonyms": [
+   "unclear",
+   "vague",
+   "open to interpretation"
+  ],
+  "tip": "gu は「ギュ」。vague は「中身がぼんやり」で少し意味が違う",
+  "translation": "エージェントは曖昧な依頼の処理が得意だ。",
+  "word": "ambiguous",
+  "id": "ambiguous",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "We incorporated an agent node into the approval flow.",
+  "ipa": "/ɪnˈkɔrpəˌreɪt/",
+  "meaning": "組み込む",
+  "order": 4,
+  "pos": "動詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "in-COR-po-rate",
+  "stressNote": "COR を強く",
+  "synonyms": [
+   "integrate",
+   "include",
+   "build in"
+  ],
+  "tip": "最初の in は弱く、COR を強く",
+  "translation": "承認フローにエージェントノードを組み込んだ。",
+  "word": "incorporate",
+  "id": "incorporate",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "The agent triages incoming emails by urgency.",
+  "ipa": "/triˈɑʒ/ または /ˈtriɑʒ/",
+  "meaning": "振り分け・優先順位付け",
+  "order": 5,
+  "pos": "名詞・動詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "tri-AGE",
+  "stressNote": "TRI-age と前を強く読む人もいる",
+  "synonyms": [
+   "sort",
+   "prioritize",
+   "route"
+  ],
+  "tip": "「トライ」ではなく「トリー」。語尾は「ジュ」に近い",
+  "translation": "エージェントが受信メールを緊急度で振り分ける。",
+  "word": "triage",
+  "id": "triage",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "If the confidence is low, escalate it to a human.",
+  "ipa": "/ˈɛskəˌleɪt/",
+  "meaning": "上位に回す・引き上げる",
+  "order": 6,
+  "pos": "動詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "ES-ca-late",
+  "stressNote": "最初の ES を強く",
+  "synonyms": [
+   "elevate",
+   "hand off",
+   "refer"
+  ],
+  "tip": "カタカナの「エスカレート」と違い ES を強く。会話では「悪化する」の意味もある",
+  "translation": "確信度が低ければ人に回す。",
+  "word": "escalate",
+  "id": "escalate",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "You can enforce the output format in the workflow.",
+  "ipa": "/ɪnˈfɔrs/",
+  "meaning": "強制する・徹底させる",
+  "order": 7,
+  "pos": "動詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "en-FORCE",
+  "stressNote": "後ろの FORCE を強く",
+  "synonyms": [
+   "mandate",
+   "require",
+   "impose"
+  ],
+  "tip": "f は下唇を軽く噛む。最後は r の後に s",
+  "translation": "ワークフローで出力形式を強制できる。",
+  "word": "enforce",
+  "id": "enforce",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "This feature will roll out next month.",
+  "ipa": "/ˌroʊl ˈaʊt/",
+  "meaning": "順次展開する",
+  "order": 8,
+  "pos": "句動詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "roll OUT",
+  "stressNote": "動詞は OUT を強く。名詞 rollout は ROLL を強く",
+  "synonyms": [
+   "release",
+   "launch",
+   "deploy"
+  ],
+  "tip": "roll は「ロール」ではなく「ロウル」",
+  "translation": "この機能は来月展開される。",
+  "word": "roll out",
+  "id": "roll-out",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "We need to monitor credit consumption every month.",
+  "ipa": "/kənˈsʌmpʃən/",
+  "meaning": "使用量・消費量",
+  "order": 9,
+  "pos": "名詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "con-SUMP-tion",
+  "stressNote": "SUMP を強く",
+  "synonyms": [
+   "usage",
+   "use"
+  ],
+  "tip": "con は弱く短く「クン」に近い",
+  "translation": "毎月クレジットの使用量を監視する必要がある。",
+  "word": "consumption",
+  "id": "consumption",
+  "category": "tech"
+ },
+ {
+  "day": 1,
+  "example": "This dashboard gives us better visibility into costs.",
+  "ipa": "/ˌvɪzəˈbɪləti/",
+  "meaning": "見える化・状況把握",
+  "order": 10,
+  "pos": "名詞",
+  "source": "技術セッションでよく出る語（Claude作成）",
+  "stress": "vis-i-BIL-i-ty",
+  "stressNote": "BIL を強く",
+  "synonyms": [
+   "insight",
+   "transparency"
+  ],
+  "tip": "v と z（濁ったス）に注意。米国では ty が「ディ」に近く聞こえる",
+  "translation": "このダッシュボードでコストを把握しやすくなる。",
+  "word": "visibility",
+  "id": "visibility",
+  "category": "tech"
+ },
+ {
+  "id": "figure-out",
+  "word": "figure out",
+  "pos": "句動詞",
+  "meaning": "理解する・解決策を見つける",
+  "ipa": "/ˌfɪɡjər ˈaʊt/",
+  "stress": "fig-ure OUT",
+  "stressNote": "句動詞は後ろの OUT を強く",
+  "synonyms": [
+   "work out",
+   "understand",
+   "solve"
+  ],
+  "example": "I'm still trying to figure out how this works.",
+  "translation": "この仕組みをまだ理解しようとしているところです。",
+  "tip": "figure の gu は「ギュ」に近く、軽く",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 11,
+  "day": 2
+ },
+ {
+  "id": "reach-out",
+  "word": "reach out",
+  "pos": "句動詞",
+  "meaning": "連絡を取る",
+  "ipa": "/ˌriːtʃ ˈaʊt/",
+  "stress": "reach OUT",
+  "stressNote": "OUT を強く",
+  "synonyms": [
+   "contact",
+   "get in touch",
+   "message"
+  ],
+  "example": "Feel free to reach out if you have any questions.",
+  "translation": "質問があれば気軽に連絡してください。",
+  "tip": "reach と out はつなげて「リーチャウト」",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 12,
+  "day": 2
+ },
+ {
+  "id": "catch-up",
+  "word": "catch up",
+  "pos": "句動詞",
+  "meaning": "近況を話す・追いつく",
+  "ipa": "/ˌkætʃ ˈʌp/",
+  "stress": "catch UP",
+  "stressNote": "UP を強く",
+  "synonyms": [
+   "get together",
+   "talk",
+   "keep up"
+  ],
+  "example": "Let's catch up after the keynote.",
+  "translation": "基調講演のあとで話しましょう。",
+  "tip": "catch と up をつなげて「キャチャップ」",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 13,
+  "day": 2
+ },
+ {
+  "id": "bear-with",
+  "word": "bear with",
+  "pos": "句動詞",
+  "meaning": "（少し）待つ・辛抱する",
+  "ipa": "/ˈbɛr wɪð/",
+  "stress": "BEAR with",
+  "stressNote": "BEAR を強く、with は弱く短く",
+  "synonyms": [
+   "be patient with",
+   "wait for",
+   "give me a moment"
+  ],
+  "example": "Please bear with me, I'm still learning English.",
+  "translation": "まだ英語を勉強中なので、少しお付き合いください。",
+  "tip": "bear は「ベア」、口を横に開いて",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 14,
+  "day": 2
+ },
+ {
+  "id": "clarify",
+  "word": "clarify",
+  "pos": "動詞",
+  "meaning": "はっきりさせる・明確にする",
+  "ipa": "/ˈklɛrəˌfaɪ/",
+  "stress": "CLAR-i-fy",
+  "stressNote": "最初の CLAR を強く",
+  "synonyms": [
+   "explain",
+   "make clear",
+   "spell out"
+  ],
+  "example": "Could you clarify what you mean by that?",
+  "translation": "それはどういう意味か、はっきり教えてもらえますか？",
+  "tip": "l の後の母音は「エ」。クラ ではなく クレ",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 15,
+  "day": 2
+ },
+ {
+  "id": "appreciate",
+  "word": "appreciate",
+  "pos": "動詞",
+  "meaning": "感謝する・ありがたく思う",
+  "ipa": "/əˈpriːʃiˌeɪt/",
+  "stress": "ap-PRE-ci-ate",
+  "stressNote": "2つ目の PRE を強く",
+  "synonyms": [
+   "thank",
+   "be grateful for",
+   "value"
+  ],
+  "example": "I really appreciate your help.",
+  "translation": "本当に助かります。",
+  "tip": "pre は「プリー」と伸ばす。ci は「シ」",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 16,
+  "day": 2
+ },
+ {
+  "id": "available",
+  "word": "available",
+  "pos": "形容詞",
+  "meaning": "利用できる・手が空いている",
+  "ipa": "/əˈveɪləbəl/",
+  "stress": "a-VAIL-a-ble",
+  "stressNote": "VAIL を強く",
+  "synonyms": [
+   "accessible",
+   "free",
+   "ready"
+  ],
+  "example": "Is this feature available in Japan?",
+  "translation": "この機能は日本で使えますか？",
+  "tip": "v は下唇を軽く噛む。最初の a はあいまいな「ア」",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 17,
+  "day": 2
+ },
+ {
+  "id": "struggle",
+  "word": "struggle",
+  "pos": "動詞",
+  "meaning": "苦労する",
+  "ipa": "/ˈstrʌɡəl/",
+  "stress": "STRUG-gle",
+  "stressNote": "最初の STRUG を強く",
+  "synonyms": [
+   "have trouble",
+   "find it hard",
+   "fight"
+  ],
+  "example": "I sometimes struggle to follow fast speakers.",
+  "translation": "速く話す人について行くのに苦労することがあります。",
+  "tip": "str の間に母音を入れない（スト・ラではなく一気に）",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 18,
+  "day": 2
+ },
+ {
+  "id": "recommend",
+  "word": "recommend",
+  "pos": "動詞",
+  "meaning": "勧める",
+  "ipa": "/ˌrɛkəˈmɛnd/",
+  "stress": "rec-om-MEND",
+  "stressNote": "最後の MEND を強く",
+  "synonyms": [
+   "suggest",
+   "advise",
+   "propose"
+  ],
+  "example": "Which session would you recommend?",
+  "translation": "どのセッションがおすすめですか？",
+  "tip": "最初の rec も軽く強めだが、一番強いのは MEND",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 19,
+  "day": 2
+ },
+ {
+  "id": "actually",
+  "word": "actually",
+  "pos": "副詞",
+  "meaning": "実は・実際には",
+  "ipa": "/ˈæktʃuəli/",
+  "stress": "AC-tu-al-ly",
+  "stressNote": "最初の AC を強く",
+  "synonyms": [
+   "in fact",
+   "really",
+   "to be honest"
+  ],
+  "example": "Actually, this is my first time here.",
+  "translation": "実は、ここに来るのは初めてなんです。",
+  "tip": "a は「ア」と「エ」の中間の口で。会話では「アクシュリ」と縮まる",
+  "category": "general",
+  "source": "会話でよく使う語（Claude作成）",
+  "order": 20,
+  "day": 2
+ }
+]
