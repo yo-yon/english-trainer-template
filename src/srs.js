@@ -81,6 +81,100 @@
     return "again";
   }
 
+  /**
+   * 音ごとの改善のコツ（日本語話者がつまずきやすい音を中心に）。キーは Azure が返す IPA（en-US）。
+   * 無い音は DEFAULT_TIP を使う。
+   */
+  const PHONEME_TIPS = {
+    "θ": "舌先を上の前歯に軽く当て、すき間から息だけを出す（「ス」にしない）",
+    "ð": "θ と同じ舌の位置で、声を出しながら息を出す（「ズ」「ダ」にしない）",
+    "r": "舌先をどこにも付けずに奥へ丸め、唇を少しすぼめる（「ラ」にしない）",
+    "l": "舌先を上の歯ぐきにしっかり付けたまま声を出す。語末の l は「ウ」に近く聞こえてよい",
+    "v": "上の前歯を下唇に軽く当て、声を出しながら息を出す（「ブ」にしない）",
+    "f": "上の前歯を下唇に軽く当て、息だけを出す（「フ」の唇を丸めない）",
+    "w": "唇を強くすぼめてから、次の母音へ一気に開く",
+    "j": "舌の前を上あごに近づけて「イ」の形から次の母音へ移る",
+    "h": "喉の奥から息だけを出す。「フ」のように唇を丸めない",
+    "æ": "口を横に大きく開き、「ア」と「エ」の間の音を出す（apps, and, that）",
+    "ə": "口と舌の力を抜いて、あいまいに短く「ア」。強く読まない（about の a, data の 2つ目の a）",
+    "ʌ": "口を軽く開けて、短く強めの「ア」",
+    "ɑ": "口を縦に大きく開けて、喉の奥から「アー」",
+    "ɔ": "唇を少し丸めて、口を縦に開けた「オー」",
+    "ɪ": "力を抜いた短い「イ」。「エ」に少し近い",
+    "i": "唇を横に引いて、はっきり長めの「イー」",
+    "ʊ": "唇を軽く丸めた、力の抜けた短い「ウ」",
+    "u": "唇を強く丸めて前に突き出し、長めの「ウー」",
+    "ɝ": "舌を奥に丸めたまま「アー」と r の響きを出す（work, first）",
+    "ɚ": "舌を奥に丸めて、弱く短い r の響きで終える（-er）",
+    "eɪ": "「エ」から「イ」へなめらかに動かす二重母音。「エー」と伸ばさない（data, day）",
+    "oʊ": "「オ」から「ウ」へ唇を丸めていく二重母音。「オー」と伸ばさない（go, know）",
+    "aɪ": "「ア」から「イ」へなめらかに動かす（I, my）",
+    "aʊ": "「ア」から「ウ」へ唇を丸めていく（about, now）",
+    "ɔɪ": "「オ」から「イ」へ動かす（choice）",
+    "t": "語頭は息を強く出す。母音にはさまれた t（data, that's a）は、舌先で軽く弾く「ラ」に近い音でよい",
+    "d": "舌先を上の歯ぐきに当ててから離す。語末の d も落とさず、軽く止める",
+    "p": "唇を閉じてから、息を破裂させるように強く出す",
+    "b": "唇を閉じてから、声を出しながら開く",
+    "k": "舌の奥を上あごに付けてから、息を強く出す",
+    "g": "舌の奥を上あごに付けてから、声を出しながら離す",
+    "s": "歯を軽く閉じ、舌先を歯ぐきに近づけて鋭く息を出す。後ろに「ウ」を付けない",
+    "z": "s と同じ形で、声を出す（「ズ」の後ろに「ウ」を付けない）",
+    "ʃ": "唇を少し突き出して「シュ」。息を強めに",
+    "ʒ": "ʃ と同じ形で、声を出す（usually の s）",
+    "tʃ": "舌を歯ぐきに付けてから「チ」と破裂させる",
+    "dʒ": "舌を歯ぐきに付けてから、声を出して「ヂ」",
+    "m": "唇をしっかり閉じて鼻から声を出す。語末でも唇を閉じる",
+    "n": "舌先を上の歯ぐきにしっかり付けて鼻から声を出す。語末の n も舌を付けたまま終える",
+    "ŋ": "舌の奥を上あごに付けて鼻から声を出す。後ろに「グ」を付けない（-ing）",
+  };
+  const DEFAULT_TIP = "お手本を「ゆっくり」で聞き、この音だけを何度かまねしてから文に戻す";
+
+  /**
+   * 結果の総評と改善点（最大3つ）。発音評価の数値だけから作る（AI は使わない）。
+   * @returns {{verdict:{level:string,en:string,ja:string,msg:string}, hints:Array<{kind:string,ph?:string,words:string[],score?:number,tip:string}>}}
+   */
+  function pronFeedback(r, name = "strict") {
+    const L = level(name);
+    const j = r.judge ?? judgeScore(r, name).score;
+    const ng = r.ngCount ?? judgeScore(r, name).ng;
+    const verdict = j >= 90 && (name === "standard" || ng === 0)
+      ? { level: "ok", en: "Good!", ja: "良い", msg: "通じる発音です。この調子で、お手本のリズムに合わせて仕上げましょう。" }
+      : j >= 80
+        ? { level: "mid", en: "Almost", ja: "あと少し", msg: "全体は通じます。下の改善点の単語だけを直すと「良い」になります。" }
+        : { level: "ng", en: "Keep practicing", ja: "要練習", msg: "まずは下の改善点の単語を、お手本の「ゆっくり」で練習してから、もう一度話してみましょう。" };
+    const hints = [];
+    // 1) 言い落とし
+    const omit = (r.words || []).filter((w) => w.err === "Omission").map((w) => w.w);
+    if (omit.length) hints.push({ kind: "omit", words: omit.slice(0, 4), tip: "聞き取れませんでした。弱く読む語でも、口の形は作って短く言う" });
+    // 2) 点数の低い音（崩れた単語の中で、ok 未満の音をまとめる）
+    const byPh = new Map();
+    for (const w of r.words || []) {
+      if (w.err === "Omission" || w.err === "Insertion") continue;
+      const weak = w.err === "Mispronunciation" || (w.acc != null && w.acc < L.ok);
+      if (!weak) continue;
+      for (const [ph, a] of w.ph || []) {
+        if (a >= L.ok) continue;
+        const e = byPh.get(ph) || { ph, words: [], score: 100 };
+        if (!e.words.includes(w.w)) e.words.push(w.w);
+        e.score = Math.min(e.score, a);
+        byPh.set(ph, e);
+      }
+    }
+    const phs = [...byPh.values()].sort((a, b) => a.score - b.score || b.words.length - a.words.length);
+    for (const e of phs) {
+      if (hints.length >= 3) break;
+      hints.push({ kind: "phoneme", ph: e.ph, words: e.words.slice(0, 3), score: e.score, tip: PHONEME_TIPS[e.ph] || DEFAULT_TIP });
+    }
+    // 3) 崩れた単語はあるのに、音ごとの点数が無い場合
+    if (!phs.length && hints.length < 3) {
+      const weakWords = (r.words || []).filter((w) => w.err !== "Omission" && w.err !== "Insertion" && (w.err === "Mispronunciation" || (w.acc != null && w.acc < L.ok))).map((w) => w.w);
+      if (weakWords.length) hints.push({ kind: "word", words: weakWords.slice(0, 3), tip: DEFAULT_TIP });
+    }
+    // 4) 流暢さ
+    if (hints.length < 3 && r.flu != null && r.flu < 75) hints.push({ kind: "fluency", words: [], tip: "途中で止まらず、意味のまとまりごとに一息で言う。お手本の直後にかぶせて話すと、リズムがつかみやすい" });
+    return { verdict, hints };
+  }
+
   /** Speech SDK の JSON 結果を、画面表示と保存に使う形に整える */
   function parsePron(json) {
     const nb = json && json.NBest && json.NBest[0];
@@ -105,5 +199,5 @@
     };
   }
 
-  return { DAY, startOfDay, ymd, nextState, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, STRICTNESS };
+  return { DAY, startOfDay, ymd, nextState, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, PHONEME_TIPS, STRICTNESS };
 });

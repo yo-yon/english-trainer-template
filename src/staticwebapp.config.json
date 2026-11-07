@@ -6,7 +6,7 @@
     { "route": "/logout", "redirect": "/.auth/logout" },
     { "route": "/unauthorized.html", "allowedRoles": ["anonymous"] },
     { "route": "/api/*", "allowedRoles": ["owner"] },
-    { "route": "/*", "allowedRoles": ["owner"] }
+    { "route": "/*", "allowedRoles": ["owner"], "headers": { "Cache-Control": "no-cache" } }
   ],
   "responseOverrides": {
     "401": { "statusCode": 302, "redirect": "/.auth/login/aad?post_login_redirect_uri=.referrer" },

@@ -5,7 +5,7 @@ const { requireOwner } = require("../src/lib.js");
 
 const NOW = new Date("2026-11-03T08:00:00+09:00").getTime();
 
-test("nextState は Claude版と同じ間隔になる", () => {
+test("nextState の間隔が想定どおりになる", () => {
   let s = S.nextState(null, "good", NOW);
   assert.equal(s.interval, 1);
   s = S.nextState(s, "good", NOW);
@@ -136,4 +136,43 @@ test("sendToHub は URL 未設定なら送らず、失敗しても例外を投�
 
 test("URL の直後の日本語は消さない", () => {
   assert.equal(share.scrub("https://example.com/a?b=1の画面が使いにくい", 100), "[URL]の画面が使いにくい");
+});
+
+test("pronFeedback：総評は判定点と要練習の語数で決まる", () => {
+  const ok = { judge: 93, ngCount: 0, flu: 95, words: [{ w: "hello", acc: 95, err: "None", ph: [["h", 95]] }] };
+  assert.equal(S.pronFeedback(ok, "strict").verdict.level, "ok");
+  assert.equal(S.pronFeedback(ok, "strict").hints.length, 0);
+  assert.equal(S.pronFeedback({ ...ok, judge: 93, ngCount: 1 }, "strict").verdict.level, "mid");
+  assert.equal(S.pronFeedback({ ...ok, judge: 70 }, "strict").verdict.level, "ng");
+  assert.equal(S.pronFeedback({ ...ok, judge: 93, ngCount: 1 }, "standard").verdict.level, "ok");
+});
+
+test("pronFeedback：崩れた単語の低い音から改善点を最大3つ、低い順に出す", () => {
+  const r = {
+    judge: 78, ngCount: 2, flu: 60,
+    words: [
+      { w: "data", acc: 49, err: "Mispronunciation", ph: [["d", 90], ["eɪ", 80], ["t", 30], ["ə", 60]] },
+      { w: "about", acc: 63, err: "None", ph: [["ə", 55], ["b", 95], ["aʊ", 92], ["t", 70]] },
+      { w: "the", acc: 98, err: "None", ph: [["ð", 40]] }, // 単語として良いので対象外
+      { w: "and", acc: null, err: "Omission", ph: [] },
+    ],
+  };
+  const fb = S.pronFeedback(r, "strict");
+  assert.equal(fb.hints.length, 3);
+  assert.equal(fb.hints[0].kind, "omit");
+  assert.deepEqual(fb.hints[0].words, ["and"]);
+  assert.equal(fb.hints[1].ph, "t");
+  assert.deepEqual(fb.hints[1].words, ["data", "about"]);
+  assert.equal(fb.hints[1].score, 30);
+  assert.equal(fb.hints[2].ph, "ə");
+  assert.ok(fb.hints.every((h) => h.tip && h.tip.length > 5));
+  assert.ok(!fb.hints.some((h) => h.ph === "ð"));
+});
+
+test("pronFeedback：辞書に無い音は既定のコツ、音素が無ければ単語、流暢さが低ければ一言", () => {
+  const a = S.pronFeedback({ judge: 85, ngCount: 0, flu: 90, words: [{ w: "x", acc: 80, err: "None", ph: [["ʔ", 50]] }] }, "strict");
+  assert.equal(a.hints[0].ph, "ʔ");
+  assert.match(a.hints[0].tip, /ゆっくり/);
+  const b = S.pronFeedback({ judge: 85, ngCount: 1, flu: 60, words: [{ w: "y", acc: 50, err: "Mispronunciation", ph: [] }] }, "strict");
+  assert.deepEqual(b.hints.map((h) => h.kind), ["word", "fluency"]);
 });

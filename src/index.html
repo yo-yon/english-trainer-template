@@ -18,7 +18,7 @@
   <header>
     <div class="toprow">
       <span class="eyebrow">English Trainer</span>
-      <span class="row" style="gap:12px"><button class="linkbtn" id="open-idea">ご意見・要望</button><a class="note" href="/logout">サインアウト</a></span>
+      <span class="row" style="gap:12px"><button class="linkbtn" id="open-idea">ご意見・要望</button><a class="note" href="/logout">サインアウト</a><span class="note" id="app-ver"></span></span>
     </div>
     <h1>今日の30分</h1>
     <div class="stats">
@@ -35,6 +35,7 @@
     <button role="tab" id="tab-list" aria-selected="false">一覧</button>
   </nav>
 
+  <div id="update" class="banner update" role="status" hidden><span id="update-text"></span> <button class="btn" id="update-btn">更新する</button></div>
   <div id="banner" class="banner" hidden></div>
 
   <section id="view-study"></section>
