@@ -41,6 +41,12 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(
 .btn svg{width:18px;height:18px;flex:none}
 .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700;justify-content:center;width:100%;min-height:48px;font-size:16px}
 .btn.rec{background:var(--again);border-color:var(--again);color:#fff}
+/* マイクの音量メーター。縦線（-38dBFS）を超えれば声として十分 */
+.meter{position:relative;height:10px;border-radius:999px;background:var(--line);overflow:hidden}
+.meter::after{content:"";position:absolute;left:36.7%;top:0;bottom:0;width:2px;background:var(--ink);opacity:.4}
+.meter i{display:block;height:100%;width:0;background:var(--muted);transition:width .08s linear}
+.meter i.low{background:var(--hard)}
+.meter i.ok{background:var(--good)}
 .btn[disabled]{opacity:.55;cursor:default}
 .ipa{font-family:var(--f-ipa);font-size:22px}
 .stress{display:flex;flex-wrap:wrap;gap:2px;font-family:var(--f-word);font-size:20px;align-items:baseline}
@@ -99,8 +105,18 @@ input[type=text]{width:100%;font:inherit;font-size:17px;padding:10px 12px;border
 .verdict{border-radius:10px;padding:12px 14px;font-size:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:4px}
 .verdict.ok{border-color:var(--good)}.verdict.ng{border-color:var(--again)}
 .verdict b{font-size:15px}.verdict.ok b{color:var(--good)}.verdict.ng b{color:var(--again)}
+.verdict.mid{border-color:var(--hard)}.verdict.mid b{color:var(--hard)}
+.pw .mk{font-size:12px;margin-right:3px}
+.pw .ok .mk{color:var(--good)}.pw .mid .mk{color:var(--hard)}.pw .ng .mk,.pw .omit .mk{color:var(--again)}
+.hints{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.hints ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px;font-size:14px}
+.hints .ipa{font-family:var(--f-ipa);font-size:16px}
+.hints .w{font-family:var(--f-word);font-weight:600}
+.btn.sm{padding:4px 10px;font-size:13px;min-height:0;width:auto}
 .score{font-family:var(--f-word);font-size:56px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
 .banner{font-size:13px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--surface)}
+.banner.update{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;border-color:var(--accent)}
+.banner.update[hidden]{display:none}
 /* 発音評価 */
 .scores{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .sc{border:1px solid var(--line);border-radius:10px;padding:8px 4px;text-align:center}

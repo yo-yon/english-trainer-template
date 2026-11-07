@@ -2,7 +2,8 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.6.0";
+const APP_VERSION = "0.6.1";
+try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
 const MIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
@@ -51,19 +52,125 @@ function browserSay(text, rate) {
   } catch (e) { showBanner("このブラウザでは音声読み上げが使えません。"); }
 }
 
-/* 再生は Web Audio で行う（スマホでも、タップ後の非同期再生が止められにくい） */
+/* 再生は Web Audio で行う（AudioContext は録音にも使う）。
+   出力先を明示的に選んだときだけ <audio> 要素で再生する（setSinkId は <audio> 要素にしかない）。
+   iPhone では <audio> 要素で再生した後、録音が無音になったため（v0.5.2）、既定では使わない */
 let audioCtx = null, playing = null;
+const player = new Audio();
+player.setAttribute("playsinline", ""); player.preload = "auto";
+let playerUnlocked = false;
+// 無音の短い WAV（タップの中で一度鳴らしておくと、後から非同期で再生しても止められにくい）
+const SILENT_WAV = (() => {
+  const n = 800, b = new DataView(new ArrayBuffer(44 + n * 2));
+  const w = (o, s) => [...s].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); b.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, 8000, true); b.setUint32(28, 16000, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, "data"); b.setUint32(40, n * 2, true);
+  return URL.createObjectURL(new Blob([b.buffer], { type: "audio/wav" }));
+})();
 function unlockAudio() {
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
   } catch (e) {}
+  if (!playerUnlocked && useSink()) {
+    playerUnlocked = true;
+    try { player.src = SILENT_WAV; const p = player.play(); if (p) p.catch(() => { playerUnlocked = false; }); } catch (e) { playerUnlocked = false; }
+  }
 }
-function stopAudio() { try { playing && playing.stop(); } catch (e) {} playing = null; try { speechSynthesis.cancel(); } catch (e) {} }
+function stopAudio() {
+  try { playing && playing.stop(); } catch (e) {} playing = null;
+  try { player.pause(); } catch (e) {}
+  try { speechSynthesis.cancel(); } catch (e) {}
+}
+
+/* ---------- 出力先（スピーカー／受話口など）。setSinkId に対応した端末だけ選べる ---------- */
+const OUT_KEY = "et-output";
+const canPickOutput = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+let outputs = [];        // enumerateDevices の audiooutput
+let lastPeak = null, lastMaxDb = null; // 直近の録音の最大音量（診断用）
+let lastSinkError = "";
+const savedOutput = () => { try { return localStorage.getItem(OUT_KEY) || ""; } catch (e) { return ""; } };
+async function refreshOutputs() {
+  try { outputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audiooutput"); } catch (e) { outputs = []; }
+  return outputs;
+}
+async function applySink() {
+  if (!canPickOutput) return;
+  const id = savedOutput();
+  try { if (player.sinkId !== id) await player.setSinkId(id); lastSinkError = ""; }
+  catch (e) { lastSinkError = String((e && e.name) || e); }
+}
+function outputSelectHTML(id) {
+  if (!canPickOutput || outputs.length < 2) return "";
+  const cur = savedOutput();
+  return `<label class="note" for="${id}" style="display:flex;gap:6px;align-items:center">音の出力先
+    <select id="${id}"><option value="">端末におまかせ</option>${outputs.map((d, i) => `<option value="${esc(d.deviceId)}" ${d.deviceId === cur ? "selected" : ""}>${esc(d.label || "出力先 " + (i + 1))}</option>`).join("")}</select></label>`;
+}
+function diagText() {
+  const as = navigator.audioSession;
+  return [
+    `アプリ: v${APP_VERSION}`,
+    `ブラウザ: ${navigator.userAgent}`,
+    `出力先の選択 (setSinkId): ${canPickOutput ? "対応" : "非対応"}`,
+    `選んでいる出力先: ${savedOutput() ? (outputs.find((d) => d.deviceId === savedOutput())?.label || "（一覧にない）") : "端末におまかせ"}`,
+    `今の出力先 (sinkId): ${canPickOutput ? (player.sinkId ? player.sinkId.slice(0, 8) + "…" : "既定") : "-"}${lastSinkError ? "　切り替え失敗: " + lastSinkError : ""}`,
+    `出力先の一覧: ${outputs.length ? outputs.map((d, i) => d.label || "名前なし " + (i + 1)).join(" / ") : "なし（録音を一度すると取れることがあります）"}`,
+    `再生方法: ${usePlayer && useSink() ? "<audio> 要素（出力先を指定）" : "Web Audio"}`,
+    `Audio Session: ${as ? as.type : "非対応"}`,
+    `マイクの感度: ${(MIC_GAINS.find(([v]) => v === micGain()) || [])[1]}`,
+    `直近の録音の最大音量: ${lastPeak == null ? "まだ録音していません" : (lastPeak * 100).toFixed(1) + "%（平均音量の最大 " + (isFinite(lastMaxDb) ? lastMaxDb.toFixed(0) : "-") + "dB、目安 " + OK_DB + "dB）"}`,
+  ].join("\n");
+}
+function bindOutputSelect(id, rerender) {
+  const el = $(id); if (!el) return;
+  el.onchange = async (e) => {
+    try { localStorage.setItem(OUT_KEY, e.target.value); } catch (er) {}
+    await applySink();
+    if (lastSinkError) showBanner("この出力先には切り替えられませんでした（" + lastSinkError + "）。");
+    rerender();
+  };
+}
+/* iPhone（Safari・Chrome とも WebKit）：マイクを使うと通話用の状態になり、出力が受話口に切り替わる。
+   対応している端末では、再生前に「再生用」、録音前に「録音用」と明示する（navigator.audioSession） */
+function setAudioSession(type) { try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch (e) {} }
+/* 録音後、受話口に向いたままの AudioContext を捨てる。次のタップで作り直す（decode 済みの音声も作り直し。音声データは端末に保存済みなので課金はない） */
+function resetOutput() {
+  stopAudio();
+  try { audioCtx && audioCtx.close(); } catch (e) {}
+  audioCtx = null; memAudio.clear();
+  setAudioSession("playback");
+}
 async function playBuffer(buf) {
   stopAudio();
+  setAudioSession("playback");
   const src = audioCtx.createBufferSource();
   src.buffer = buf; src.connect(audioCtx.destination); src.start(); playing = src;
+}
+/* mp3 を <audio> 要素で再生。再生できないとき（自動再生の制限など）は Web Audio に切り替える */
+const memUrl = new Map();            // 端末内の再生済み音声（Blob URL。AudioContext を作り直しても使える）
+let usePlayer = true;                 // <audio> 要素が再生できない環境では false にする
+function useSink() { return canPickOutput && !!savedOutput(); }
+async function playMp3(key, bytes) {
+  if (usePlayer && useSink()) {
+    try {
+      let url = memUrl.get(key);
+      if (!url) { url = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" })); memUrl.set(key, url); }
+      stopAudio();
+      setAudioSession("playback");
+      await applySink();
+      player.src = url;
+      await player.play();
+      return;
+    } catch (e) {
+      if (!/NotAllowed|NotSupported/i.test(String((e && e.name) || e))) throw e;
+      usePlayer = false; // 以後は Web Audio で再生
+    }
+  }
+  if (memAudio.has(key)) return playBuffer(memAudio.get(key));
+  if (!bytes) bytes = await (await fetch(memUrl.get(key))).arrayBuffer();
+  const buf = await audioCtx.decodeAudioData(bytes.slice(0));
+  memAudio.set(key, buf);
+  return playBuffer(buf);
 }
 
 /* 速さは3段階。通常はタグなし（SSMLのタグも課金文字数に入るため） */
@@ -107,7 +214,8 @@ async function say(text, rate) {
   const key = `${(tokenCache && tokenCache.voice) || "ava"}|${rk}|${text}`;
   try {
     if (!audioCtx || !window.SpeechSDK) throw new Error("no_audio");
-    if (memAudio.has(key)) return playBuffer(memAudio.get(key));
+    if (usePlayer && useSink() && memUrl.has(key)) return playMp3(key, null);
+    if (memAudio.has(key) && !(usePlayer && useSink())) return playBuffer(memAudio.get(key));
     const req = new Request("/__tts/" + encodeURIComponent(key));
     let bytes = null;
     try { const hit = await (await caches.open(CACHE)).match(req); if (hit) bytes = await hit.arrayBuffer(); } catch (e) {}
@@ -119,9 +227,7 @@ async function say(text, rate) {
       bytes = await synthAzure(text, rk);
       try { await (await caches.open(CACHE)).put(req, new Response(bytes.slice(0), { headers: { "Content-Type": "audio/mpeg" } })); } catch (e) {}
     }
-    const buf = await audioCtx.decodeAudioData(bytes.slice(0));
-    memAudio.set(key, buf);
-    return playBuffer(buf);
+    return playMp3(key, bytes);
   } catch (e) {
     const det = String((e && (e.details || e.message)) || e);
     if (/429|Too many|quota|exceed/i.test(det)) ttsDisabledUntil = Date.now() + 60000;
@@ -236,17 +342,31 @@ function renderShadow() {
       <button class="btn" id="toggle-ja">${sShowJa ? "訳を隠す" : "訳を見る"}</button>
       ${hide ? `<button class="btn" id="show-text">文を見る</button>` : ""}
     </div>
-    <button class="btn primary ${recording ? "rec" : ""}" id="rec" ${recording ? "disabled" : ""}>${MIC}${recording ? "聞き取り中…話し終わると自動で止まります" : r ? "もう一度話す" : "話す（録音して評価）"}</button>`;
+    <div class="row" style="gap:12px">${outputSelectHTML("out-sel-shadow")}${gainSelectHTML("gain-sel-shadow")}</div>
+    <button class="btn primary ${recording ? "rec" : ""}" id="rec" ${recording ? "disabled" : ""}>${MIC}${recording ? "聞き取り中…話し終わると自動で止まります" : r ? "もう一度話す" : "話す（録音して評価）"}</button>
+    ${recording ? `<div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div>
+      <p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>` : ""}`;
   if (r) {
-    h += `<div class="scores">
+    const fb = S.pronFeedback(r, st().strictness);
+    const MARK = { ok: "✓", mid: "△", ng: "✕", omit: "✕", ins: "" };
+    h += `<div class="verdict ${fb.verdict.level}" role="status">
+        <b>${fb.verdict.level === "ok" ? "✓" : fb.verdict.level === "mid" ? "△" : "✕"} ${esc(fb.verdict.en)}（${esc(fb.verdict.ja)}）</b>
+        <span>${esc(fb.verdict.msg)}</span>
+      </div>
+      <div class="scores">
         <div class="sc main"><div class="v">${r.judge}</div><div class="k">判定点</div></div>
         <div class="sc"><div class="v">${r.acc}</div><div class="k">正確さ</div></div>
         <div class="sc"><div class="v">${r.flu}</div><div class="k">流暢さ</div></div>
         <div class="sc"><div class="v">${r.comp}</div><div class="k">完全さ</div></div>
       </div>
-      <div class="pw">${r.words.map((w, i) => `<button class="${S.wordClass(w, st().strictness)}" data-pw="${i}">${esc(w.w)}${w.acc != null && w.err !== "Omission" ? `<small class="note"> ${w.acc}</small>` : ""}</button>`).join("")}</div>
+      <div class="pw">${r.words.map((w, i) => { const c = S.wordClass(w, st().strictness); return `<button class="${c}" data-pw="${i}">${MARK[c] ? `<span class="mk" aria-hidden="true">${MARK[c]}</span>` : ""}${esc(w.w)}${w.acc != null && w.err !== "Omission" ? `<small class="note"> ${w.acc}</small>` : ""}</button>`; }).join("")}</div>
+      ${fb.hints.length ? `<div class="hints"><p class="note" style="margin:0">改善点</p><ol>${fb.hints.map((t) => `<li>
+          <div>${t.kind === "phoneme" ? `<span class="ipa">/${esc(t.ph)}/</span> ` : ""}${t.words.length ? t.words.map((x) => `<b class="w">${esc(x)}</b>`).join("・") : ""}${t.kind === "phoneme" ? `<span class="note">（${t.score}点）</span>` : t.kind === "omit" ? `<span class="note">（言い落とし）</span>` : t.kind === "fluency" ? `<b>流暢さ</b><span class="note">（${r.flu}点）</span>` : ""}</div>
+          <div>${esc(t.tip)}</div>
+          ${t.words[0] ? `<div class="row" style="margin-top:4px">${t.words.slice(0, 2).map((x) => `<button class="btn sm" data-say="${esc(x)}" data-rate="0.6">${SLOW}${esc(x)}</button>`).join("")}</div>` : ""}
+        </li>`).join("")}</ol></div>` : ""}
       <p class="note" style="margin:0">Azure の総合点 ${r.pron}点${r.judge < r.pron ? ` から、崩れた単語の分を減点しています（採点：${esc((S.STRICTNESS[st().strictness]?.label || "").replace(/（.*）/, ""))}）` : ""}${r.ngCount && r.judge >= 90 && st().strictness !== "standard" ? `。「要練習」の単語が${r.ngCount}語あるので、「覚えた」にはなりません` : ""}</p>
-      <div class="legend"><span><i style="background:var(--good)"></i>良い</span><span><i style="background:var(--hard)"></i>あと少し</span><span><i style="background:var(--again)"></i>要練習</span><span>取り消し線＝言い落とし</span></div>
+      <div class="legend"><span><i style="background:var(--good)"></i>✓ 良い</span><span><i style="background:var(--hard)"></i>△ あと少し</span><span><i style="background:var(--again)"></i>✕ 要練習</span><span>取り消し線＝言い落とし</span></div>
       ${openWord >= 0 && r.words[openWord] ? `<div><p class="note" style="margin:0 0 4px">「${esc(r.words[openWord].w)}」の音ごとの点数</p>
         <div class="phon">${r.words[openWord].ph.map(([p, a]) => `<span style="border-color:${a < 60 ? "var(--again)" : a < 80 ? "var(--hard)" : "var(--good)"}">${esc(p)} ${a}</span>`).join("") || '<span class="note">音素データなし</span>'}</div>
         <div class="row" style="margin-top:6px"><button class="btn" data-say="${esc(r.words[openWord].w)}" data-rate="0.6">${SLOW}この単語をゆっくり</button></div></div>` : `<p class="note" style="margin:0">単語をタップすると、音ごとの点数が見られます。</p>`}
@@ -260,7 +380,79 @@ function renderShadow() {
   $("toggle-ja").onclick = () => { sShowJa = !sShowJa; renderShadow(); };
   if ($("show-text")) $("show-text").onclick = () => { $("sent-text").classList.remove("hidden"); $("show-text").remove(); };
   $("rec").onclick = startAssessment;
+  bindOutputSelect("out-sel-shadow", renderShadow);
+  bindGainSelect("gain-sel-shadow", renderShadow);
   if ($("next-sent")) $("next-sent").onclick = nextSentence;
+}
+
+/* 録音はアプリ側で行い、16kHz・16bit・モノラルの PCM にして SDK の push stream に流す。
+   SDK 既定のマイク入力は、トークン取得の後（タップの外）に 16kHz の AudioContext を新しく作るため、
+   iPhone では無音のまま「聞き取れませんでした」になることがある。
+   こちらはタップの中で起こした AudioContext を使い、トークン取得より先に録音を始める（話し始めも切れない） */
+/* ---------- マイクの感度と音量メーター ---------- */
+const GAIN_KEY = "et-micgain";        // 端末ごとに違うので、端末に保存（PCとスマホで共有しない）
+const MIC_GAINS = [[1, "標準"], [2, "高め（×2）"], [4, "最大（×4）"]];
+const micGain = () => { try { const g = +localStorage.getItem(GAIN_KEY); return MIC_GAINS.some(([v]) => v === g) ? g : 1; } catch (e) { return 1; } };
+const OK_DB = -38, QUIET_DB = -50;    // 声として十分な目安／ほぼ無音
+const dbToPct = (db) => Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+function gainSelectHTML(id) {
+  return `<label class="note" for="${id}" style="display:flex;gap:6px;align-items:center">マイクの感度
+    <select id="${id}">${MIC_GAINS.map(([v, l]) => `<option value="${v}" ${v === micGain() ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
+}
+function bindGainSelect(id, rerender) {
+  const el = $(id); if (!el) return;
+  el.onchange = (e) => { try { localStorage.setItem(GAIN_KEY, e.target.value); } catch (er) {} rerender(); };
+}
+function updateMeter(db) {
+  const bar = $("mic-level"), label = $("mic-label"); if (!bar) return;
+  bar.style.width = dbToPct(db).toFixed(0) + "%";
+  bar.className = db >= OK_DB ? "ok" : db >= QUIET_DB ? "low" : "";
+  if (label) label.textContent = db >= OK_DB ? "聞こえています" : db >= QUIET_DB ? "声が小さめです。マイクに近づくか、感度を上げてください" : "聞こえていません。話してみてください";
+}
+
+async function openMic(onPcm, onLevel) {
+  setAudioSession("play-and-record");
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true }, video: false,
+  });
+  if (audioCtx.state === "suspended") { try { await audioCtx.resume(); } catch (e) {} }
+  const ctx = audioCtx;
+  const srcNode = ctx.createMediaStreamSource(stream);
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  const mute = ctx.createGain(); mute.gain.value = 0; // 処理を動かすために出力へつなぐが、音は出さない
+  const ratio = ctx.sampleRate / 16000;
+  let carry = 0;
+  const gain = micGain();
+  const mic = { peak: 0, maxDb: -Infinity, close: null };
+  proc.onaudioprocess = (ev) => {
+    const x = ev.inputBuffer.getChannelData(0);
+    // carry = この区間で次に作るサンプルの開始位置（0以上）
+    const n = Math.ceil((x.length - carry) / ratio);
+    if (n <= 0) { carry -= x.length; return; }
+    const out = new Int16Array(n);
+    let sq = 0;
+    for (let i = 0; i < n; i++) {
+      // 区間の平均で 16kHz に間引く（簡易ローパス）
+      const a = Math.floor(carry + i * ratio), b = Math.min(x.length, Math.floor(carry + (i + 1) * ratio));
+      let sum = 0; for (let j = a; j < b; j++) sum += x[j];
+      const v = Math.max(-1, Math.min(1, (b > a ? sum / (b - a) : x[a] || 0) * gain)); // 感度を掛けて、はみ出しは切る
+      const abs = Math.abs(v); if (abs > mic.peak) mic.peak = abs;
+      sq += v * v;
+      out[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+    }
+    carry = carry + n * ratio - x.length;
+    onPcm(out.buffer);
+    const db = 20 * Math.log10(Math.max(Math.sqrt(sq / n), 1e-6)); // 区間の平均音量（dBFS）
+    if (db > mic.maxDb) mic.maxDb = db;
+    if (onLevel) onLevel(db);
+  };
+  srcNode.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+  mic.close = () => {
+    proc.onaudioprocess = null;
+    try { srcNode.disconnect(); proc.disconnect(); mute.disconnect(); } catch (e) {}
+    stream.getTracks().forEach((t) => t.stop());
+  };
+  return mic;
 }
 
 async function startAssessment() {
@@ -268,18 +460,24 @@ async function startAssessment() {
   const SDK = window.SpeechSDK;
   if (!SDK) { showBanner("音声評価の部品を読み込めていません。ページを開き直してください。"); return; }
   stopAudio();
+  unlockAudio(); // タップの中で AudioContext を起こす（iPhone はタップの外では動き出さない）
+  if (!audioCtx) { showBanner("このブラウザでは録音できません。"); return; }
   recording = true; renderShadow(); showBanner("");
-  let recognizer = null;
+  let recognizer = null, mic = null, push = null, timer = null;
   try {
+    push = SDK.AudioInputStream.createPushStream(SDK.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
+    mic = await openMic((buf) => { try { push.write(buf); } catch (e) {} }, updateMeter);
     const tk = await speechToken();
     const cfg = SDK.SpeechConfig.fromAuthorizationToken(tk.token, tk.region);
     cfg.speechRecognitionLanguage = "en-US";
-    const audio = SDK.AudioConfig.fromDefaultMicrophoneInput();
+    const audio = SDK.AudioConfig.fromStreamInput(push);
     const pa = new SDK.PronunciationAssessmentConfig(sCur.text, SDK.PronunciationAssessmentGradingSystem.HundredMark, SDK.PronunciationAssessmentGranularity.Phoneme, true);
     pa.phonemeAlphabet = "IPA";
     // 抑揚（Prosody）は追加料金のため使わない
     recognizer = new SDK.SpeechRecognizer(cfg, audio);
     pa.applyTo(recognizer);
+    // 1文30秒以内。万一終わらないときは 35 秒で入力を閉じて結果を受け取る
+    timer = setTimeout(() => { try { mic && mic.close(); push.close(); } catch (e) {} }, 35000);
     const result = await new Promise((resolve, reject) => recognizer.recognizeOnceAsync(resolve, reject));
     if (result.reason === SDK.ResultReason.RecognizedSpeech) {
       const json = JSON.parse(result.properties.getProperty(SDK.PropertyId.SpeechServiceResponse_JsonResult));
@@ -292,7 +490,12 @@ async function startAssessment() {
       if (sBest == null || r.judge > sBest || (r.judge === sBest && r.ngCount < sBestNg)) { sBest = r.judge; sBestNg = r.ngCount; }
       queueSave(() => api("attempts", { method: "POST", body: JSON.stringify({ sentenceId: sCur.id, text: sCur.text, pron: r.pron, judge: r.judge, strictness: st().strictness, acc: r.acc, flu: r.flu, comp: r.comp, recognized: r.recognized, words: r.words }) }));
     } else if (result.reason === SDK.ResultReason.NoMatch) {
-      showBanner("声を聞き取れませんでした。マイクに近づいて、もう一度話してください。");
+      // マイクの音量がほぼゼロなら、声の大きさではなく録音そのものの問題
+      showBanner(mic && mic.peak < 0.01
+        ? `マイクの音がほとんど入っていません（最大音量 ${(mic.peak * 100).toFixed(1)}%）。ほかのアプリがマイクを使っていないか確認して、ページを開き直してください。`
+        : mic && mic.maxDb < OK_DB
+          ? `声が小さかったようです（最大 ${mic.maxDb.toFixed(0)}dB、目安 ${OK_DB}dB）。マイクに近づくか、「マイクの感度」を上げてもう一度話してください。`
+          : "声を聞き取れませんでした。マイクに近づいて、もう一度話してください。");
     } else {
       const d = SDK.CancellationDetails.fromResult(result);
       showBanner(/429|Too many/i.test(d.errorDetails || "") ? "混み合っています。数秒おいてもう一度試してください。" : "評価できませんでした（" + (d.errorDetails || d.reason) + "）");
@@ -301,8 +504,15 @@ async function startAssessment() {
   } catch (e) {
     if (e && e.message !== "auth") showBanner(/Permission|NotAllowed/i.test(String(e)) ? "マイクの使用を許可してください。" : "評価できませんでした。もう一度試してください。");
   } finally {
+    clearTimeout(timer);
+    if (mic) { lastPeak = mic.peak; lastMaxDb = mic.maxDb; }
+    try { mic && mic.close(); } catch (e) {}
+    try { push && push.close(); } catch (e) {}
     try { recognizer && recognizer.close(); } catch (e) {}
+    resetOutput(); // 受話口に向いたままにしない
     recording = false; renderShadow();
+    // マイクを許可した後は出力先の名前も取れるので、一覧を取り直す
+    refreshOutputs().then(() => { if (!recording) renderShadow(); });
   }
 }
 
@@ -506,6 +716,12 @@ function renderList() {
       <details id="fb-details"><summary>送ったフィードバック</summary>
         <div class="list fbhist" id="fb-hist" style="margin-top:8px">${fbHistoryHTML()}</div>
       </details>
+      ${outputSelectHTML("out-sel-list")}
+      ${gainSelectHTML("gain-sel-list")}
+      <details id="diag"><summary>音声の診断情報（アプリ v${APP_VERSION}）</summary>
+        <pre class="note" id="diag-body" style="white-space:pre-wrap;word-break:break-all;margin:8px 0">${esc(diagText())}</pre>
+        <button class="btn" id="diag-refresh">更新</button>
+      </details>
       <details ${data.words.length ? "" : "open"}><summary>データ管理</summary>
         <p class="note">最初に入っている単語とシャドーイング用の文を取り込みます。同じIDのデータは上書きされます（復習の記録は消えません）。</p>
         <button class="btn" id="import">初期データを取り込む</button>
@@ -525,6 +741,9 @@ function renderList() {
     };
   }
   $("hide").onchange = (e) => { st().hideText = e.target.checked; saveSettings(); renderShadow(); };
+  bindOutputSelect("out-sel-list", () => { renderList(); renderShadow(); });
+  bindGainSelect("gain-sel-list", () => { renderList(); renderShadow(); });
+  $("diag-refresh").onclick = async () => { await refreshOutputs(); $("diag-body").textContent = diagText(); };
   $("import").onclick = importSeed;
   $("fb-details").ontoggle = (e) => { if (e.target.open && !fbHistory) loadFbHistory(); };
 }
@@ -716,9 +935,33 @@ async function load() {
   counts();
 }
 renderStudy();
+refreshOutputs();
 load().catch((e) => { if (e.message !== "auth") { loaded = true; showBanner("データを読み込めませんでした。ページを開き直してください。"); renderStudy(); } });
 /* 別の端末で学習したあとに戻ってきたら読み直す（スマホとPCの同期） */
+/* ---------- 新しい版の確認 ----------
+   iPhone の Chrome は、タブを開き直してもページを読み込み直さず、前の画面をそのまま出すことがある。
+   起動時と画面に戻ったときに、サーバーの app.js の版を確かめ、新しければ「更新」を出す（5分に1回まで） */
+let verCheckedAt = 0;
+async function checkUpdate() {
+  if (Date.now() - verCheckedAt < 5 * 60 * 1000) return;
+  verCheckedAt = Date.now();
+  try {
+    const t = await (await fetch("/app.js", { cache: "no-store" })).text();
+    const m = t.match(/const APP_VERSION = "([^"]+)"/);
+    if (!m || m[1] === APP_VERSION) return;
+    const bar = $("update");
+    $("update-text").textContent = `新しい版（v${m[1]}）があります。いまは v${APP_VERSION} です。`;
+    bar.hidden = false;
+  } catch (e) {}
+}
+$("update-btn").onclick = () => { if (!recording) location.reload(); };
+checkUpdate();
+
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && loaded && !recording && !quiz && !revealed && !sResult) load().catch(() => {});
+  if (document.visibilityState !== "visible") return;
+  checkUpdate();
+  if (loaded && !recording && !quiz && !revealed && !sResult) load().catch(() => {});
 });
+// 戻る・タブ復元でメモリ上の画面が出たとき（bfcache）も確かめる
+window.addEventListener("pageshow", (e) => { if (e.persisted) { verCheckedAt = 0; checkUpdate(); } });
 })();
