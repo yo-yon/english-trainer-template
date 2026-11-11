@@ -132,6 +132,7 @@ input[type=text]{width:100%;font:inherit;font-size:17px;padding:10px 12px;border
 .pw .ins{color:var(--muted);border-style:dotted}
 .phon{display:flex;flex-wrap:wrap;gap:6px;font-family:var(--f-ipa);font-size:18px}
 .phon span{border-radius:6px;padding:0 6px;border:1px solid var(--line)}
+.drill{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:12px}
 .legend{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
 details summary{cursor:pointer;color:var(--muted);font-size:13px}
@@ -156,3 +157,56 @@ dialog#share::backdrop{background:rgba(0,0,0,.4)}
 .sharebox{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 code{font-size:12px}
 #fb-share-row{display:flex;gap:6px;align-items:center}
+/* 会話ロールプレイ */
+.scene-list{display:grid;gap:10px}
+.scene-group{margin:6px 0 0;font-size:13px;letter-spacing:.08em;color:var(--muted);font-weight:700}
+summary.scene-group{cursor:pointer}
+.scene-btn .targets{display:block;margin-top:2px;color:var(--accent)}
+.chip.used{border-color:var(--good);color:var(--good);font-weight:700}
+.scene-btn{display:flex;align-items:center;gap:12px;text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:14px;padding:12px 14px;font:inherit;cursor:pointer}
+.scene-btn:hover{border-color:var(--accent)}
+.scene-emoji{font-size:26px;line-height:1}
+.scene-btn .grow{flex:1;min-width:0}
+.talk-log{display:flex;flex-direction:column;gap:10px}
+.bubble{max-width:88%;padding:10px 12px;border-radius:14px;border:1px solid var(--line);font-size:15px;line-height:1.5;overflow-wrap:anywhere}
+.bubble.ai{align-self:flex-start;background:var(--bg)}
+.bubble.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.bubble .veil{filter:blur(6px);user-select:none}
+.bubble .tools{display:flex;gap:6px;align-items:center;margin-top:6px}
+.bubble .tools .iconbtn{width:32px;height:32px}
+.bubble .help{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.hintbox{border:1px dashed var(--accent);border-radius:12px;padding:10px 12px}
+.textin{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;font-size:15px;background:var(--surface);color:var(--ink)}
+ul.rv{margin:4px 0 0;padding-left:20px}
+/* フレーズ帳 */
+.phrasebook summary{cursor:pointer;list-style-position:inside}
+.phrasebook .list{margin-top:6px}
+.save-ph{white-space:nowrap}
+.saved{white-space:nowrap;color:var(--good)}
+.recall .cue{margin:0;font-size:18px;line-height:1.5}
+.compose .cue{margin:0;font-size:18px;line-height:1.5}
+textarea.textin{width:100%;resize:vertical;font-family:inherit}
+/* ディクテーション：書けた語・書けなかった語 */
+.dictans .dk{color:var(--good)}
+.dictans .dm{color:var(--again);text-decoration:underline;text-decoration-thickness:2px;font-weight:700}
+/* 苦手な音 */
+.sound .ipa.big{font-size:28px;font-weight:700}
+.chip.ng{border-color:var(--again);color:var(--again)}
+.chip.mid{border-color:var(--hard);color:var(--hard)}
+/* 定着率 */
+.retention .big{font-size:24px;font-weight:700;color:var(--good)}
+/* 採点中：押せないが、待っていることが分かるように回る印を出す（v0.17.0） */
+.btn.scoring{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;opacity:1;cursor:progress}
+.btn.scoring small{font-weight:normal;opacity:.85}
+.spin{width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;flex:none}
+@media (prefers-reduced-motion:no-preference){.spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}}
+
+/* 音の口の形（唇・舌・声） */
+.guide{display:flex;flex-direction:column;gap:6px;margin-top:6px;padding:8px 10px;border-radius:10px;background:var(--bg);font-size:14px;line-height:1.55}
+details.guide summary{font-size:13px}
+details.guide[open] summary{margin-bottom:4px}
+.guide .gkana{font-weight:700}
+.guide .gl{display:grid;grid-template-columns:5.2em 1fr;gap:6px;align-items:start}
+.guide .gk{color:var(--muted);white-space:nowrap;font-size:13px}
+.guide .gfix{font-weight:600}
+.guide .gex{flex-wrap:wrap;align-items:center;gap:6px}

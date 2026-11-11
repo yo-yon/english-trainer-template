@@ -25,13 +25,15 @@
       <span class="chip">単語 復習 <b id="s-wrev">0</b></span>
       <span class="chip">単語 新規 <b id="s-wnew">0</b></span>
       <span class="chip">文 <b id="s-sent">0</b></span>
+      <span class="chip">会話 <b id="s-talk">1</b></span>
     </div>
   </header>
 
   <nav role="tablist">
     <button role="tab" id="tab-study" aria-selected="true">単語</button>
     <button role="tab" id="tab-shadow" aria-selected="false">シャドーイング</button>
-    <button role="tab" id="tab-quiz" aria-selected="false">クイズ</button>
+    <button role="tab" id="tab-talk" aria-selected="false">会話</button>
+    <button role="tab" id="tab-quiz" aria-selected="false">練習</button>
     <button role="tab" id="tab-list" aria-selected="false">一覧</button>
   </nav>
 
@@ -40,6 +42,7 @@
 
   <section id="view-study"></section>
   <section id="view-shadow" hidden></section>
+  <section id="view-talk" hidden></section>
   <section id="view-quiz" hidden></section>
   <section id="view-list" hidden></section>
 </div>

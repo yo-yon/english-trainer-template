@@ -2,6 +2,23 @@
 
 更新の取り込み方は [docs/UPDATING.md](docs/UPDATING.md) を見てください。
 
+## 0.18.0（2026-11-11）
+
+版の番号を、元のアプリ（english-trainer）とそろえました（0.6.1 の次が 0.18.0 です）。
+
+変わったファイル：`src/app.js`、`src/srs.js`、`src/style.css`、`src/index.html`、`src/seed/scenes.json`（新規）、`api/src/functions/index.js`、`api/src/lib.js`、`api/src/roleplay.js`・`compose.js`・`phrase.js`（新規）、`api/test/`（`roleplay`・`compose`・`phrase` のテストを新規）、`api/local.settings.sample.json`、`SETUP.md`、`README.md`、`ROADMAP.md`
+
+**更新するときの注意**：会話タブを使うには Foundry（gpt-5.4-mini）の設定が必要です（SETUP.md 手順6・8）。設定しなくても、ほかの機能は動きます。追加の Azure リソースや環境変数は必須ではありません。
+
+- **会話**タブ：海外のカンファレンス・旅行・日常の15場面で AI とロールプレイ。毎回、変化球と相手の性格が変わる。「訳を見る」で相手の発言の訳。最後に振り返り。1日60回まで（`ROLEPLAY_DAILY_LIMIT`）
+- **フレーズ帳**：振り返りのフレーズや言い換えを保存し、シャドーイングの会話文として出題
+- **練習**タブ（クイズを統合）：瞬間作文（AI 判定は1日100回まで、`COMPOSE_DAILY_LIMIT`）、ディクテーション、苦手な音、今週のまとめ、定着率
+- **単語の発音練習**：シャドーイングでつまずいた単語を、2〜4語のまとまりで言い直して評価。聞こえた音（d→t など）と直し方を表示。発音記号に口の形・舌の位置・声の出し方を添える
+- 録音は「■ 話し終わった」で止める（3秒黙っても止まる）。採点中の表示。聞き取れなかったときは設定を変えて評価し直す
+- 録音の診断（雑音・声の音量・前後の無音・音割れ）と、アプリを切り替えた後にマイクが固まる問題の修正
+- 「もう一度」の文・単語が今日の出題に戻り続けて終わらない問題の修正。読み上げに「さらにゆっくり」（0.5倍）
+- 画面上部の「会話」の数を、単語・文と同じ「今日の残り」に
+
 ## 0.6.1（2026-11-07）
 
 変わったファイル：`src/app.js`、`src/srs.js`、`src/style.css`、`src/index.html`、`src/staticwebapp.config.json`、`api/test/srs.test.js`

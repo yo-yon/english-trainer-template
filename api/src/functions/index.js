@@ -1,8 +1,11 @@
 const { app } = require("@azure/functions");
-const { requireOwner, listPartition, getOne, upsert, upsertMany, safeKey, bad, fail } = require("../lib");
+const { requireOwner, listPartition, getOne, upsert, upsertMany, remove, safeKey, bad, fail } = require("../lib");
 const share = require("../share");
+const roleplay = require("../roleplay");
+const phrase = require("../phrase");
+const compose = require("../compose");
 
-const KINDS = { word: "card-word", sentence: "card-sentence" };
+const KINDS = { word: "card-word", sentence: "card-sentence", compose: "card-compose", dict: "card-dict" };
 
 /* ---------- Speech の短期トークン（有効10分。9分間は使い回す） ---------- */
 let cachedToken = null; // { token, exp }
@@ -47,16 +50,19 @@ app.http("state", {
     const denied = requireOwner(request);
     if (denied) return denied;
     try {
-      const [words, sentences, wordCards, sentenceCards, settings] = await Promise.all([
+      const [words, sentences, wordCards, sentenceCards, settings, phrases, composeCards, dictCards] = await Promise.all([
         listPartition("word"),
         listPartition("sentence"),
         listPartition("card-word"),
         listPartition("card-sentence"),
         getOne("settings", "app"),
+        listPartition("phrase"),
+        listPartition("card-compose"),
+        listPartition("card-dict"),
       ]);
       const toMap = (arr) => Object.fromEntries(arr.map(({ id, ...s }) => [id, s]));
       return {
-        jsonBody: { words, sentences, cards: { word: toMap(wordCards), sentence: toMap(sentenceCards) }, settings: settings || {}, hub: { enabled: share.hubEnabled() } },
+        jsonBody: { words, sentences, phrases, cards: { word: toMap(wordCards), sentence: toMap(sentenceCards), compose: toMap(composeCards), dict: toMap(dictCards) }, settings: settings || {}, hub: { enabled: share.hubEnabled() } },
         headers: { "Cache-Control": "no-store" },
       };
     } catch (e) {
@@ -84,6 +90,7 @@ app.http("card", {
         lapses: Number(b.lapses) || 0,
         due: Number(b.due) || 0,
         best: b.best != null ? Number(b.best) : undefined,
+        first: /^\d{4}-\d{2}-\d{2}$/.test(b.first || "") ? b.first : undefined, // 初めて答えた日
       };
       await upsert(pk, safeKey(request.params.id), card);
       return { status: 204 };
@@ -143,12 +150,12 @@ app.http("attempts", {
 });
 
 /* ---------- 意味の判定（Foundry の gpt-5.4-mini） ---------- */
-async function callLLM(messages) {
+async function callLLM(messages, maxTokens = 400) {
   const ep = (process.env.FOUNDRY_ENDPOINT || "").replace(/\/+$/, "");
   const key = process.env.FOUNDRY_API_KEY;
   const model = process.env.FOUNDRY_DEPLOYMENT || "gpt-5.4-mini";
   if (!ep || !key) throw Object.assign(new Error("FOUNDRY_ENDPOINT / FOUNDRY_API_KEY が未設定です"), { code: "no_llm" });
-  const body = { model, messages, response_format: { type: "json_object" }, max_completion_tokens: 400, reasoning_effort: "low" };
+  const body = { model, messages, response_format: { type: "json_object" }, max_completion_tokens: maxTokens, reasoning_effort: "low" };
   let r = await fetch(`${ep}/openai/v1/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "api-key": key },
@@ -197,6 +204,104 @@ app.http("judge", {
       return { jsonBody: { correct: !!out.correct, comment: String(out.comment || "").slice(0, 120) } };
     } catch (e) {
       if (e.code === "no_llm") return { status: 503, jsonBody: { error: "no_llm" } };
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 会話ロールプレイ（Phase 2a） ----------
+   action: turn（相手役の返事）／review（振り返り。会話の記録も保存）／hint（日本語→英語）
+   使いすぎ防止のため、日本時間の1日あたりの回数に上限を設ける（ROLEPLAY_DAILY_LIMIT、既定 60） */
+app.http("roleplay", {
+  route: "roleplay",
+  methods: ["POST"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      let b;
+      try { b = await request.json(); } catch { return bad("body"); }
+      if (JSON.stringify(b || {}).length > 20000) return bad("too_large");
+      const p = roleplay.prepare(b);
+      if (p.error) return bad(p.error);
+
+      const limit = Number(process.env.ROLEPLAY_DAILY_LIMIT) || 60;
+      const uk = roleplay.usageKey();
+      const used = (await getOne("usage", uk)) || { count: 0 };
+      if (used.count >= limit) return { status: 429, jsonBody: { error: "daily_limit", limit } };
+      await upsert("usage", uk, { count: used.count + 1 });
+
+      const out = p.clean(await callLLM(p.messages, p.maxTokens));
+      if (b.action === "review") {
+        // 会話の記録（文字だけ。音声は保存しない）。週次の改善ループで苦手な表現を探すのに使う
+        const rk = String(9e15 - Date.now()).padStart(16, "0");
+        await upsert(roleplay.logPartition(), rk, { sceneId: p.scene.id, history: p.history, review: out, at: new Date().toISOString() });
+      }
+      return { jsonBody: { ...out, remaining: Math.max(0, limit - used.count - 1) }, headers: { "Cache-Control": "no-store" } };
+    } catch (e) {
+      if (e.code === "no_llm") return { status: 503, jsonBody: { error: "no_llm" } };
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 瞬間作文の判定（Phase 3a） ----------
+   お手本とほぼ同じなら AI を呼ばない。AI を呼ぶ回数は1日 COMPOSE_DAILY_LIMIT 回まで（既定 100） */
+app.http("composeJudge", {
+  route: "compose-judge",
+  methods: ["POST"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      let b;
+      try { b = await request.json(); } catch { return bad("body"); }
+      const p = compose.prepare(b);
+      if (p.error) return bad(p.error);
+      if (compose.quickMatch(p.answer, p.model)) return { jsonBody: { grade: "correct", better: p.model, note: "", by: "match" } };
+      const limit = Number(process.env.COMPOSE_DAILY_LIMIT) || 100;
+      const uk = roleplay.usageKey().replace("roleplay-", "compose-");
+      const used = (await getOne("usage", uk)) || { count: 0 };
+      if (used.count >= limit) return { status: 429, jsonBody: { error: "daily_limit", limit } };
+      await upsert("usage", uk, { count: used.count + 1 });
+      return { jsonBody: compose.clean(await callLLM(p.messages, 400), p.model), headers: { "Cache-Control": "no-store" } };
+    } catch (e) {
+      if (e.code === "no_llm") return { status: 503, jsonBody: { error: "no_llm" } };
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- フレーズ帳（Phase 2b） ----------
+   POST：保存（同じ表現があればそれを返す）／DELETE：削除（復習状態も消す） */
+app.http("phrase", {
+  route: "phrase/{id?}",
+  methods: ["POST", "DELETE"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      if (request.method === "DELETE") {
+        const id = request.params.id || "";
+        if (!/^p[a-z0-9]{4,20}$/.test(id)) return bad("id");
+        await remove("phrase", id);
+        await remove("card-sentence", id);
+        return { status: 204 };
+      }
+      let b;
+      try { b = await request.json(); } catch { return bad("body"); }
+      const r = phrase.cleanPhrase(b);
+      if (r.error) return bad(r.error);
+      const existing = await listPartition("phrase");
+      const dup = phrase.findDuplicate(existing, r.item.text);
+      if (dup) return { jsonBody: { item: dup, duplicate: true } };
+      if (existing.length >= phrase.MAX_PHRASES) return { status: 409, jsonBody: { error: "too_many", limit: phrase.MAX_PHRASES } };
+      await upsert("phrase", r.item.id, r.item);
+      return { status: 201, jsonBody: { item: r.item, duplicate: false } };
+    } catch (e) {
       return fail(context, e);
     }
   },

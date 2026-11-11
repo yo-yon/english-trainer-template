@@ -2,17 +2,18 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.6.1";
+const APP_VERSION = "0.18.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
 const MIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
 
 /* ---------- 状態 ---------- */
-let data = { words: [], sentences: [], cards: { word: {}, sentence: {} }, settings: {} };
+let data = { words: [], sentences: [], phrases: [], cards: { word: {}, sentence: {}, compose: {}, dict: {} }, settings: {} };
 let loaded = false;
-const defaults = { newPerDay: 10, newSentencesPerDay: 5, newLog: { date: "", count: 0 }, newSentLog: { date: "", count: 0 }, quiz: { total: 0, correct: 0 }, hideText: false, strictness: "strict" };
+const defaults = { newPerDay: 10, newSentencesPerDay: 5, composePerDay: 5, dictPerDay: 3, newLog: { date: "", count: 0 }, newSentLog: { date: "", count: 0 }, composeLog: { date: "", count: 0 }, dictLog: { date: "", count: 0 }, quiz: { total: 0, correct: 0 }, hideText: false, strictness: "strict" };
 const st = () => data.settings;
+const TALK_GOAL = 1; // 1日の会話の目安（回）。上の「会話」の数は今日の残り
 
 /* ---------- 共通 ---------- */
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -32,6 +33,8 @@ function queueSave(fn) {
 function saveCard(kind, id) { const c = data.cards[kind][id]; queueSave(() => api(`card/${kind}/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(c) })); }
 let settingsTimer = null;
 function saveSettings() { clearTimeout(settingsTimer); settingsTimer = setTimeout(() => queueSave(() => api("settings", { method: "PUT", body: JSON.stringify(st()) })), 400); }
+/* 定着率：7日以上あけた復習の結果を、週ごとに設定へ記録する（単語・文・瞬間作文・ディクテーション） */
+function noteRetention(kind, prev, g) { if (S.recordRetention((st().retention = st().retention || {}), kind, prev, g)) saveSettings(); }
 function bumpLog(key) { const today = S.ymd(); if (!st()[key] || st()[key].date !== today) st()[key] = { date: today, count: 0 }; st()[key].count++; }
 
 /* ---------- 読み上げ：Azure ニューラル音声（女性）。使えないときだけブラウザ内蔵 ---------- */
@@ -87,7 +90,7 @@ function stopAudio() {
 const OUT_KEY = "et-output";
 const canPickOutput = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
 let outputs = [];        // enumerateDevices の audiooutput
-let lastPeak = null, lastMaxDb = null; // 直近の録音の最大音量（診断用）
+let lastPeak = null, lastMaxDb = null, lastStats = null, lastVariantDiag = ""; // 直近の録音の最大音量・長さ・周波数（診断用）
 let lastSinkError = "";
 const savedOutput = () => { try { return localStorage.getItem(OUT_KEY) || ""; } catch (e) { return ""; } };
 async function refreshOutputs() {
@@ -119,6 +122,9 @@ function diagText() {
     `Audio Session: ${as ? as.type : "非対応"}`,
     `マイクの感度: ${(MIC_GAINS.find(([v]) => v === micGain()) || [])[1]}`,
     `直近の録音の最大音量: ${lastPeak == null ? "まだ録音していません" : (lastPeak * 100).toFixed(1) + "%（平均音量の最大 " + (isFinite(lastMaxDb) ? lastMaxDb.toFixed(0) : "-") + "dB、目安 " + OK_DB + "dB）"}`,
+    `直近の録音の長さと周波数: ${lastStats ? `送った音声 ${lastStats.sentSec}秒・実際 ${lastStats.wallSec}秒、処理 ${lastStats.ctxRate}Hz／マイク ${lastStats.trackRate || "不明"}Hz（録音開始時の状態 ${lastStats.ctxState}）。${profText(lastStats.prof, lastStats.gain)}（${lastStats.ok ? "評価できた" : "評価できなかった"}）` : "-"}`,
+    `直近の聞き取れなかった録音: ${recDiag ? recDiagText(recDiag) : "なし"}`,
+    `設定を変えた再評価（直近）: ${lastVariantDiag || "なし"}`,
   ].join("\n");
 }
 function bindOutputSelect(id, rerender) {
@@ -174,8 +180,10 @@ async function playMp3(key, bytes) {
 }
 
 /* 速さは3段階。通常はタグなし（SSMLのタグも課金文字数に入るため） */
-const rateKey = (r) => (!r || r >= 0.85 ? "n" : r >= 0.65 ? "s" : "xs");
-const RATE_PCT = { s: "-25%", xs: "-40%" };
+// 読み上げの速さ：ふつう（0.9）／ゆっくり（0.7 → -25%）／単語のゆっくり（0.55〜0.6 → -40%）／さらにゆっくり（0.5 → -50%）
+// -50%（0.5倍）は Azure の読み上げで指定できる一番遅い速さ（SSML の prosody rate は 0.5〜2倍）
+const rateKey = (r) => (!r || r >= 0.85 ? "n" : r >= 0.65 ? "s" : r >= 0.55 ? "xs" : "xxs");
+const RATE_PCT = { s: "-25%", xs: "-40%", xxs: "-50%" };
 const xmlEsc = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
 const memAudio = new Map();          // 端末内の再生済み音声（AudioBuffer）
 const CACHE = "tts-v1";
@@ -249,6 +257,8 @@ function counts() {
   $("s-wrev").textContent = all.filter((w) => data.cards.word[w.id]).length;
   $("s-wnew").textContent = all.filter((w) => !data.cards.word[w.id]).length;
   $("s-sent").textContent = [sCur, ...sQueue].filter(Boolean).length;
+  // 単語・文と同じく「今日の残り」を出す（会話は1日1回が目安。振り返りまで終えると1回）
+  if ($("s-talk")) $("s-talk").textContent = Math.max(0, TALK_GOAL - talkCountToday());
 }
 function stressHTML(s) {
   return String(s || "").split(/([- ])/).map((p) => p === "-" ? '<span class="sep">·</span>' : p === " " ? '<span class="sep">&nbsp;</span>'
@@ -299,10 +309,12 @@ function renderStudy() {
 function gradeWord(g) {
   const w = wCur; if (!w) return;
   const wasNew = !data.cards.word[w.id];
+  noteRetention("word", data.cards.word[w.id], g);
   data.cards.word[w.id] = S.nextState(data.cards.word[w.id], g);
   saveCard("word", w.id);
   if (wasNew) { bumpLog("newLog"); saveSettings(); }
-  if (g === "again") wQueue.splice(Math.min(3, wQueue.length), 0, w);
+  // その場で出し直すのは1回だけ（2回目の「もう一度」は明日に回す）
+  if (g === "again" && !wRetried.has(w.id)) { wRetried.add(w.id); wQueue.splice(Math.min(3, wQueue.length), 0, w); }
   wDone++;
   wCur = wQueue.shift() || null; revealed = false;
   renderStudy();
@@ -310,9 +322,31 @@ function gradeWord(g) {
 
 /* ================= シャドーイング＋発音評価 ================= */
 let sBestNg = 0;
+const sRetried = new Set(), wRetried = new Set(); // 今日その場で出し直した文・単語
+const sExtra = new Set(); // 苦手な音の練習でシャドーイングに足した文
+/* フレーズ帳の文は、先に日本語（または直す前の言い方）から英語を思い出してもらう（検索練習）。
+   ask：思い出す → shown：答え合わせ → ok / ng：自己判定（ng なら発音の点にかかわらず明日また出す） */
+let sRecall = { id: null, state: "ask" };
+const recallOf = (s) => (s && s.phrase ? (sRecall.id === s.id ? sRecall.state : "ask") : "none");
 let sQueue = [], sCur = null, sBest = null, sResult = null, sShowJa = false, recording = false, sDone = 0, openWord = -1;
+let drill = null; // 単語の発音練習 { sid, w, res, tries, passes, msg }
+let drillRec = false; // 単語の練習で録音中（音量メーターを単語の枠に出す）
+/* 録音の段階：listen＝聞き取り中（「話し終わった」で止める）、score＝採点中（Azure の結果待ち）。
+   scoreMsg は採点中に出す説明（設定を変えて採点し直しているときなど） */
+let recPhase = "", scoreMsg = "", stopRec = null;
+// 録音ボタン：聞き取り中は「話し終わった」で止められる。採点中は押せない
+function recButtonHTML(id, active, idleLabel) {
+  if (active && recPhase === "listen") return `<button class="btn primary rec" id="${id}">■ 話し終わった（採点する）</button>`;
+  if (active && recPhase === "score") return `<button class="btn primary scoring" id="${id}" disabled aria-busy="true"><span class="spin" aria-hidden="true"></span>採点中…${scoreMsg ? `<small>（${esc(scoreMsg)}）</small>` : ""}</button>`;
+  return `<button class="btn primary" id="${id}" ${recording ? "disabled" : ""}>${MIC}${idleLabel}</button>`;
+}
 function buildSentenceQueue() {
-  sQueue = S.buildQueue(data.sentences, data.cards.sentence, st().newSentLog, st().newSentencesPerDay, "category", "conference", "conversation");
+  const q = S.buildQueue(data.sentences, data.cards.sentence, st().newSentLog, st().newSentencesPerDay, "category", "conference", "conversation");
+  // フレーズ帳の新しい表現は、期限の来た復習のすぐ後（ほかの新しい文より先）に出す
+  const isNewPhrase = (x) => x.phrase && !data.cards.sentence[x.id];
+  const rest = q.filter((x) => !isNewPhrase(x));
+  const dueCount = rest.filter((x) => data.cards.sentence[x.id]).length;
+  sQueue = [...rest.slice(0, dueCount), ...q.filter(isNewPhrase), ...rest.slice(dueCount)];
   sCur = sQueue.shift() || null; sBest = null; sBestNg = 0; sResult = null; openWord = -1;
 }
 let tokenCache = null;
@@ -327,25 +361,31 @@ function renderShadow() {
   counts();
   if (!loaded) { v.innerHTML = emptyCard("読み込んでいます", ""); return; }
   if (!data.sentences.length) { v.innerHTML = emptyCard("まだ文がありません", "「一覧」タブから初期データを取り込んでください。"); return; }
-  if (!sCur) { v.innerHTML = emptyCard("今日の文は終わりです", (sDone ? sDone + "文を練習しました。" : "") + "仕上げにクイズをどうぞ。"); return; }
+  if (!sCur) { v.innerHTML = emptyCard("今日の文は終わりです", (sDone ? sDone + "文を練習しました。" : "") + "仕上げに「練習」をどうぞ。"); return; }
   const s = sCur, c = data.cards.sentence[s.id];
+  if (drill && drill.sid !== s.id) drill = null;
+  const rc = recallOf(s);
+  if (rc === "ask" || rc === "shown") return renderRecall(v, s, c, rc);
   const hide = st().hideText && !sResult;
   const r = sResult;
   let h = `<article class="card" aria-live="polite">
-    <div class="row between"><span class="chip">${c ? "復習" : "新しい文"} · ${esc(s.scene || "")}</span>
+    <div class="row between"><span class="chip">${c ? "復習" : "新しい文"} · ${esc(s.scene || "")}${rc === "ok" ? " · ✓ 思い出せた" : rc === "ng" ? " · もう一度覚える" : ""}</span>
       <span class="row" style="gap:8px"><span class="note">${c && c.best != null ? "最高 " + c.best + "点" : ""}</span><button class="fbbtn" data-fb="sentence" aria-label="この文の内容や評価を報告">👎</button></span></div>
     <p class="sent ${hide ? "hidden" : ""}" id="sent-text">${esc(s.text)}</p>
     ${sShowJa ? `<p class="tr" style="margin:-6px 0 0">${esc(s.ja)}</p>` : ""}
     <div class="row">
       <button class="btn" data-say="${esc(s.text)}">${SPK}お手本</button>
       <button class="btn" data-say="${esc(s.text)}" data-rate="0.7">${SLOW}ゆっくり</button>
+      <button class="btn" data-say="${esc(s.text)}" data-rate="0.5">${SLOW}さらにゆっくり</button>
       <button class="btn" id="toggle-ja">${sShowJa ? "訳を隠す" : "訳を見る"}</button>
       ${hide ? `<button class="btn" id="show-text">文を見る</button>` : ""}
     </div>
     <div class="row" style="gap:12px">${outputSelectHTML("out-sel-shadow")}${gainSelectHTML("gain-sel-shadow")}</div>
-    <button class="btn primary ${recording ? "rec" : ""}" id="rec" ${recording ? "disabled" : ""}>${MIC}${recording ? "聞き取り中…話し終わると自動で止まります" : r ? "もう一度話す" : "話す（録音して評価）"}</button>
-    ${recording ? `<div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div>
-      <p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>` : ""}`;
+    ${recButtonHTML("rec", recording && !drillRec, r ? "もう一度話す" : "話す（録音して評価）")}
+    ${recording && !drillRec && recPhase === "listen" ? `<div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div>
+      <p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>
+      <p class="note" style="margin:0">言い終わったら「■ 話し終わった」を押してください（3秒黙ると自動でも止まります）。</p>` : ""}
+    ${drill ? "" : recDiagHTML()}`;
   if (r) {
     const fb = S.pronFeedback(r, st().strictness);
     const MARK = { ok: "✓", mid: "△", ng: "✕", omit: "✕", ins: "" };
@@ -363,13 +403,14 @@ function renderShadow() {
       ${fb.hints.length ? `<div class="hints"><p class="note" style="margin:0">改善点</p><ol>${fb.hints.map((t) => `<li>
           <div>${t.kind === "phoneme" ? `<span class="ipa">/${esc(t.ph)}/</span> ` : ""}${t.words.length ? t.words.map((x) => `<b class="w">${esc(x)}</b>`).join("・") : ""}${t.kind === "phoneme" ? `<span class="note">（${t.score}点）</span>` : t.kind === "omit" ? `<span class="note">（言い落とし）</span>` : t.kind === "fluency" ? `<b>流暢さ</b><span class="note">（${r.flu}点）</span>` : ""}</div>
           <div>${esc(t.tip)}</div>
-          ${t.words[0] ? `<div class="row" style="margin-top:4px">${t.words.slice(0, 2).map((x) => `<button class="btn sm" data-say="${esc(x)}" data-rate="0.6">${SLOW}${esc(x)}</button>`).join("")}</div>` : ""}
+          ${t.kind === "phoneme" ? guideHTML(t.guide, { ph: t.ph, open: false }) : ""}
+          ${t.words[0] ? `<div class="row" style="margin-top:4px">${t.words.slice(0, 2).map((x) => `<button class="btn sm" data-say="${esc(x)}" data-rate="0.6">${SLOW}${esc(x)}</button>`).join("")}${t.kind === "phoneme" || t.kind === "word" ? `<button class="btn sm" data-drill="${esc(t.words[0])}" ${recording ? "disabled" : ""}>${MIC}${esc(t.words[0])} を録音して練習</button>` : ""}</div>` : ""}
         </li>`).join("")}</ol></div>` : ""}
       <p class="note" style="margin:0">Azure の総合点 ${r.pron}点${r.judge < r.pron ? ` から、崩れた単語の分を減点しています（採点：${esc((S.STRICTNESS[st().strictness]?.label || "").replace(/（.*）/, ""))}）` : ""}${r.ngCount && r.judge >= 90 && st().strictness !== "standard" ? `。「要練習」の単語が${r.ngCount}語あるので、「覚えた」にはなりません` : ""}</p>
       <div class="legend"><span><i style="background:var(--good)"></i>✓ 良い</span><span><i style="background:var(--hard)"></i>△ あと少し</span><span><i style="background:var(--again)"></i>✕ 要練習</span><span>取り消し線＝言い落とし</span></div>
-      ${openWord >= 0 && r.words[openWord] ? `<div><p class="note" style="margin:0 0 4px">「${esc(r.words[openWord].w)}」の音ごとの点数</p>
+      ${drill ? drillHTML() : openWord >= 0 && r.words[openWord] ? `<div><p class="note" style="margin:0 0 4px">「${esc(r.words[openWord].w)}」の音ごとの点数</p>
         <div class="phon">${r.words[openWord].ph.map(([p, a]) => `<span style="border-color:${a < 60 ? "var(--again)" : a < 80 ? "var(--hard)" : "var(--good)"}">${esc(p)} ${a}</span>`).join("") || '<span class="note">音素データなし</span>'}</div>
-        <div class="row" style="margin-top:6px"><button class="btn" data-say="${esc(r.words[openWord].w)}" data-rate="0.6">${SLOW}この単語をゆっくり</button></div></div>` : `<p class="note" style="margin:0">単語をタップすると、音ごとの点数が見られます。</p>`}
+        <div class="row" style="margin-top:6px"><button class="btn" data-say="${esc(r.words[openWord].w)}" data-rate="0.6">${SLOW}この単語をゆっくり</button>${r.words[openWord].err !== "Insertion" ? `<button class="btn" data-drill="${esc(r.words[openWord].w)}" ${recording ? "disabled" : ""}>${MIC}この単語を練習</button>` : ""}</div></div>` : `<p class="note" style="margin:0">単語をタップすると、音ごとの点数が見られます。</p>`}
       ${r.recognized ? `<p class="note" style="margin:0">聞き取られた文：${esc(r.recognized)}</p>` : ""}
       <button class="btn primary" id="next-sent">次の文へ（今回の最高 ${sBest}点で記録）</button>`;
   } else {
@@ -379,10 +420,129 @@ function renderShadow() {
   v.innerHTML = h;
   $("toggle-ja").onclick = () => { sShowJa = !sShowJa; renderShadow(); };
   if ($("show-text")) $("show-text").onclick = () => { $("sent-text").classList.remove("hidden"); $("show-text").remove(); };
-  $("rec").onclick = startAssessment;
+  $("rec").onclick = () => (recording ? stopRec && stopRec() : startAssessment());
   bindOutputSelect("out-sel-shadow", renderShadow);
   bindGainSelect("gain-sel-shadow", renderShadow);
   if ($("next-sent")) $("next-sent").onclick = nextSentence;
+  if ($("drill-rec")) $("drill-rec").onclick = () => (drillRec ? stopRec && stopRec() : drillRecord());
+  if ($("drill-close")) $("drill-close").onclick = () => { drill = null; renderShadow(); };
+  if ($("rec-play")) $("rec-play").onclick = playRecDiag;
+}
+
+/* 音の口の形（唇・舌・声）。発音記号だけでは分かりにくいので、近い日本語の音と口の動きで示す。
+   g：S.guideFor の結果、fix：聞こえた音に応じた直し方、heard：聞こえた音。open=false なら折りたたむ */
+function guideHTML(g, { fix = "", heard = "", ph = "", open = true } = {}) {
+  if (!g) return "";
+  const line = (icon, k, v) => (v && v !== "関係なし" ? `<div class="gl"><span class="gk">${icon} ${k}</span><span>${esc(v)}</span></div>` : "");
+  const body = `${fix ? `<div class="gfix">🔧 ${heard ? `/${esc(heard)}/ に聞こえたときの直し方：` : ""}${esc(fix)}</div>` : ""}
+    ${line("👄", "唇", g.lips)}${line("👅", "舌", g.tongue)}${line("🔊", "声・息", g.voice)}
+    ${g.ng ? `<div class="gl"><span class="gk">⚠️ 注意</span><span>${esc(g.ng)}</span></div>` : ""}
+    ${g.ex && g.ex.length ? `<div class="row gex"><span class="note">同じ音の単語：</span>${g.ex.map((x) => `<button class="btn sm" data-say="${esc(x)}" data-rate="0.6">${SLOW}${esc(x)}</button>`).join("")}</div>` : ""}`;
+  const head = `<span class="gkana">カナの目安：${esc(g.kana)}</span>`;
+  return open
+    ? `<div class="guide">${head}${body}</div>`
+    : `<details class="guide"><summary>${ph ? `/${esc(ph)}/ ` : "この音"}の口の形・舌の位置を見る</summary>${body}</details>`;
+}
+
+/* ---------- 単語の発音練習：シャドーイングでつまずいた単語を、文の中の短いまとまりで言って、その単語だけを評価する ----------
+   お手本が1語だけだと、発音評価が聞き取れないことがある（2026-11-10、発音評価なしなら認識できる録音でも失敗）。
+   そこで前後の語ごと（2〜4語）言ってもらい、採点はその単語だけにする。合格は、その単語が採点の厳しさで「良い」になったとき。
+   話された音の候補（nBestPhonemeCount）から、どの音に聞こえたかも示す。単語の記録は発音の記録（attempts）には入れない */
+function startDrill(word) {
+  const w = String(word || "").replace(/[^A-Za-z'\-]/g, "");
+  if (!w || !sCur || recording) return;
+  drill = { sid: sCur.id, w, chunk: S.drillChunk(sCur.text, w), res: null, tries: 0, passes: 0, msg: "" };
+  renderShadow();
+  // 改善点のボタンから開いたときは、練習の枠が画面の下にあるので見える位置まで動かす
+  const box = document.querySelector("#view-shadow .drill");
+  if (box) box.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+async function drillRecord() {
+  if (!drill || recording) return;
+  const d = drill;
+  d.msg = "";
+  drillRec = true;
+  let r = null;
+  try {
+    r = await assessOnce(d.chunk, { nbestPhonemes: 5 });
+    if (drill === d) {
+      if (r) {
+        d.res = S.wordDrill(r, d.w, st().strictness);
+        d.tries++;
+        if (d.res && d.res.pass) d.passes++;
+        else if (!d.res) d.msg = `「${d.w}」を聞き取れませんでした。お手本を聞いてから、まとまりごと言ってみてください。`;
+      } else {
+        // 失敗の理由は画面上部のバナーにも出るが、下までスクロールしていると見えないので枠の中にも出す
+        const b = $("banner");
+        d.msg = (b && !b.hidden && b.textContent) || "評価できませんでした。もう一度試してください。";
+      }
+    }
+  } catch (e) {
+    if (drill === d) d.msg = "評価できませんでした（" + (e && e.message ? e.message : e) + "）。ページを開き直してもう一度試してください。";
+  } finally {
+    drillRec = false;
+    renderShadow();
+  }
+}
+// まとまりの中の練習する単語を太字にする
+function chunkHTML(chunk, w) {
+  const t = String(w).toLowerCase().replace(/[^a-z']/g, "");
+  let done = false;
+  return String(chunk).split(/\s+/).map((x) => {
+    if (!done && x.toLowerCase().replace(/[^a-z']/g, "") === t) { done = true; return `<b><u>${esc(x)}</u></b>`; }
+    return esc(x);
+  }).join(" ");
+}
+function drillHTML() {
+  const d = drill, x = d.res;
+  const col = (a) => (a < 60 ? "var(--again)" : a < 80 ? "var(--hard)" : "var(--good)");
+  let h = `<div class="drill">
+    <div class="row between"><b>🎯 単語の練習：<span class="w">${esc(d.w)}</span></b><span class="note">${d.tries ? `${d.tries}回中 ${d.passes}回合格` : ""}</span></div>
+    <p class="sent" style="margin:0">${chunkHTML(d.chunk, d.w)}</p>
+    <p class="note" style="margin:0">前後の語といっしょに言ってください。採点は「${esc(d.w)}」だけです。</p>
+    <div class="row">
+      <button class="btn sm" data-say="${esc(d.chunk)}">${SPK}お手本</button>
+      <button class="btn sm" data-say="${esc(d.chunk)}" data-rate="0.6">${SLOW}ゆっくり</button>
+      <button class="btn sm" data-say="${esc(d.w)}" data-rate="0.6">${SLOW}単語だけゆっくり</button>
+    </div>
+    ${recButtonHTML("drill-rec", drillRec, d.tries ? "もう一度言う（録音して評価）" : "まとまりで言う（録音して評価）")}
+    ${drillRec && recPhase === "listen" ? `<div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div>
+      <p class="note" id="mic-label" style="margin:-4px 0 0">マイクを準備しています…</p>` : ""}
+    ${d.msg ? `<p class="note" role="alert" style="margin:0;color:var(--again)">${esc(d.msg)}</p>` : ""}
+    ${recDiagHTML()}`;
+  if (x) {
+    h += `<div class="verdict ${x.pass ? "ok" : x.level === "mid" ? "mid" : "ng"}" role="status"><b>${x.pass ? "✓ 合格" : x.level === "mid" ? "△ あと少し" : "✕ 要練習"}（${x.acc ?? 0}点）</b>
+        <span>${x.pass ? "文に戻って、もう一度通して話してみましょう。" : "下の音を意識して、お手本の「ゆっくり」をまねしてから言い直しましょう。"}</span></div>
+      <div class="phon">${x.ph.map(([p, a, heard]) => `<span style="border-color:${col(a)}">${esc(p)}${heard && a < 80 ? `→${esc(heard)}` : ""} ${a}</span>`).join("") || '<span class="note">音素データなし</span>'}</div>
+      ${x.weak.length ? `<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px">${x.weak.map((t) => `<li><span class="ipa">/${esc(t.ph)}/</span><span class="note">（${t.score}点）</span>${t.heard ? ` <span class="note">/${esc(t.ph)}/ が /${esc(t.heard)}/ に近く聞こえました</span>` : ""}<div>${esc(t.tip)}</div>${guideHTML(t.guide, { fix: t.fix, heard: t.heard })}</li>`).join("")}</ol>` : ""}`;
+  }
+  h += `<div class="row">${x && x.pass ? `<button class="btn primary" id="drill-close" style="width:auto;flex:1">文に戻る</button>` : `<button class="btn" id="drill-close">文に戻る</button>`}</div>
+    <p class="note" style="margin:0">→の右は、実際にそう聞こえた音です。単語の練習は復習の予定や発音の記録には入りません。</p>
+  </div>`;
+  return h;
+}
+
+/* フレーズ帳：思い出す → 答え合わせ → 自己判定 */
+function renderRecall(v, s, c, rc) {
+  const words = s.text.split(/\s+/);
+  v.innerHTML = `<article class="card recall" aria-live="polite">
+    <div class="row between"><span class="chip">📒 フレーズ帳 · ${c ? "復習" : "新しい表現"} · ${esc(s.scene || "")}</span><span class="note">${c && c.best != null ? "最高 " + c.best + "点" : ""}</span></div>
+    <p class="note" style="margin:0">${s.before ? "もっと自然に言うと？ 英語で声に出してみましょう" : "英語で何と言う？ 声に出してみましょう"}</p>
+    ${s.before ? `<p class="cue"><span class="note">直す前：</span>${esc(s.before)}</p>` : ""}
+    ${s.ja ? `<p class="cue">${esc(s.ja)}</p>` : ""}
+    ${!s.before && !s.ja ? `<p class="cue">（場面：${esc(s.scene || "")}）</p>` : ""}
+    ${rc === "ask"
+      ? `${sRecall.hint && sRecall.id === s.id ? `<p class="note" style="margin:0">ヒント：${esc(words.slice(0, 2).join(" "))} …（${words.length}語）</p>` : ""}
+        <div class="row">${sRecall.hint && sRecall.id === s.id ? "" : `<button class="btn" id="rc-hint">ヒント</button>`}<button class="btn primary" id="rc-show" style="width:auto;flex:1">答えを見る</button></div>`
+      : `<p class="sent">${esc(s.text)}</p>
+        <div class="row"><button class="btn" data-say="${esc(s.text)}">${SPK}もう一度聞く</button><button class="btn" data-say="${esc(s.text)}" data-rate="0.7">${SLOW}ゆっくり</button><button class="btn" data-say="${esc(s.text)}" data-rate="0.5">${SLOW}さらにゆっくり</button></div>
+        <p class="note" style="margin:0">言えましたか？（このあとシャドーイングで仕上げます）</p>
+        <div class="row"><button class="btn" id="rc-ok" style="width:auto;flex:1">✓ 言えた</button><button class="btn" id="rc-ng" style="width:auto;flex:1">✗ 言えなかった</button></div>`}
+  </article>`;
+  if ($("rc-hint")) $("rc-hint").onclick = () => { sRecall = { id: s.id, state: "ask", hint: true }; renderShadow(); };
+  if ($("rc-show")) $("rc-show").onclick = () => { sRecall = { id: s.id, state: "shown" }; renderShadow(); say(s.text, 0.9); };
+  if ($("rc-ok")) $("rc-ok").onclick = () => { sRecall = { id: s.id, state: "ok" }; renderShadow(); };
+  if ($("rc-ng")) $("rc-ng").onclick = () => { sRecall = { id: s.id, state: "ng" }; renderShadow(); };
 }
 
 /* 録音はアプリ側で行い、16kHz・16bit・モノラルの PCM にして SDK の push stream に流す。
@@ -415,7 +575,8 @@ async function openMic(onPcm, onLevel) {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true }, video: false,
   });
-  if (audioCtx.state === "suspended") { try { await audioCtx.resume(); } catch (e) {} }
+  // 別のアプリから戻った後などは resume() が終わらないことがあるので、待つのは 1.5 秒まで
+  if (audioCtx.state !== "running") { try { await Promise.race([audioCtx.resume(), sleep(1500)]); } catch (e) {} }
   const ctx = audioCtx;
   const srcNode = ctx.createMediaStreamSource(stream);
   const proc = ctx.createScriptProcessor(4096, 1, 1);
@@ -423,8 +584,15 @@ async function openMic(onPcm, onLevel) {
   const ratio = ctx.sampleRate / 16000;
   let carry = 0;
   const gain = micGain();
-  const mic = { peak: 0, maxDb: -Infinity, close: null };
+  const track = stream.getAudioTracks()[0];
+  let trackRate = null; try { trackRate = (track && track.getSettings().sampleRate) || null; } catch (e) {}
+  // 診断用：送った音声（16kHz）と、実際にかかった時間・サンプリング周波数を記録する
+  const mic = { peak: 0, maxDb: -Infinity, close: null, pcm: [], samples: 0, firstAt: 0, lastAt: 0, ctxRate: ctx.sampleRate, trackRate, ctxState: ctx.state };
+  let gotFrame = null; const firstFrame = new Promise((r) => (gotFrame = r));
   proc.onaudioprocess = (ev) => {
+    const now = performance.now();
+    if (!mic.firstAt) { mic.firstAt = now; gotFrame(); }
+    mic.lastAt = now;
     const x = ev.inputBuffer.getChannelData(0);
     // carry = この区間で次に作るサンプルの開始位置（0以上）
     const n = Math.ceil((x.length - carry) / ratio);
@@ -441,6 +609,8 @@ async function openMic(onPcm, onLevel) {
       out[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
     }
     carry = carry + n * ratio - x.length;
+    if (mic.samples < 16000 * 40) mic.pcm.push(out); // 40 秒分まで（再生・再認識の診断用。端末のメモリだけに置く）
+    mic.samples += n;
     onPcm(out.buffer);
     const db = 20 * Math.log10(Math.max(Math.sqrt(sq / n), 1e-6)); // 区間の平均音量（dBFS）
     if (db > mic.maxDb) mic.maxDb = db;
@@ -452,68 +622,272 @@ async function openMic(onPcm, onLevel) {
     try { srcNode.disconnect(); proc.disconnect(); mute.disconnect(); } catch (e) {}
     stream.getTracks().forEach((t) => t.stop());
   };
+  // マイクの音が処理に届き始めるまで最大 3 秒待つ。届かなければ AudioContext が止まっているので、捨てて作り直してもらう
+  const ok = await Promise.race([firstFrame.then(() => true), sleep(3000).then(() => false)]);
+  if (!ok) {
+    mic.close();
+    try { audioCtx && audioCtx.close(); } catch (e) {}
+    audioCtx = null;
+    throw new Error("mic_stall");
+  }
   return mic;
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const MIC_STALL_MSG = "マイクが動き出しませんでした（別のアプリから戻った直後に起きることがあります）。もう一度ボタンを押してください。続くときはページを開き直してください。";
 
-async function startAssessment() {
-  if (recording) return;
+/* ---------- 録音の診断：聞き取れなかったときに、原因の手がかりを集める ----------
+   ・Azure が返した「聞き取れなかった理由」
+   ・送った音声の長さと、実際にかかった時間（大きくずれていれば、サンプリング周波数の食い違い）
+   ・同じ音声を発音評価なしで認識し直した結果（発音評価だけが原因かどうかの切り分け。失敗したときだけ、数秒分の音声認識を使う） */
+let recDiag = null; // { why, plain, sentSec, wallSec, ctxRate, trackRate, pcm, ref, at }
+function micStats(mic) {
+  const chunk = mic.ctxRate ? 4096 / mic.ctxRate : 0; // 最後の区間の長さ
+  return {
+    sentSec: +(mic.samples / 16000).toFixed(2),
+    wallSec: mic.firstAt ? +((mic.lastAt - mic.firstAt) / 1000 + chunk).toFixed(2) : 0,
+    ctxRate: mic.ctxRate, trackRate: mic.trackRate, ctxState: mic.ctxState,
+    prof: S.audioProfile(mic.pcm), gain: micGain(),
+  };
+}
+function profText(p, gain) {
+  if (!p) return "音声の中身：なし";
+  return `雑音 ${p.noiseDb}dB・声 ${p.speechDb}dB（差 ${p.snr}dB）、声 ${p.voicedSec}秒・前の無音 ${p.leadSec}秒・後ろ ${p.tailSec}秒、音割れ ${p.clipPct}%、感度×${gain}`;
+}
+function noMatchWhy(SDK, result) {
+  try {
+    const r = SDK.NoMatchDetails.fromResult(result).reason;
+    if (r === SDK.NoMatchReason.InitialSilenceTimeout) return "無音と判定";
+    if (r === SDK.NoMatchReason.InitialBabbleTimeout) return "雑音と判定";
+    return "音はあるが言葉として認識できず";
+  } catch (e) { return "不明"; }
+}
+// 録音済みの音声（16kHz）を、もう一度認識に通す。pa を渡せば発音評価つき
+async function recognizePcm(SDK, tk, pcm, pa) {
+  let rec = null;
+  try {
+    const p = SDK.AudioInputStream.createPushStream(SDK.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
+    for (const c of pcm) p.write(c.buffer.slice(0));
+    p.close();
+    const cfg = SDK.SpeechConfig.fromAuthorizationToken(tk.token, tk.region);
+    cfg.speechRecognitionLanguage = "en-US";
+    rec = new SDK.SpeechRecognizer(cfg, SDK.AudioConfig.fromStreamInput(p));
+    if (pa) pa.applyTo(rec);
+    return await new Promise((resolve, reject) => rec.recognizeOnceAsync(resolve, reject));
+  } finally {
+    try { rec && rec.close(); } catch (e) {}
+  }
+}
+// 録音済みの音声を、連続認識で発音評価する（recognizeOnce と別の経路。診断用の別設定の1つ）
+async function recognizePcmContinuous(SDK, tk, pcm, pa) {
+  let rec = null;
+  try {
+    const p = SDK.AudioInputStream.createPushStream(SDK.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
+    for (const c of pcm) p.write(c.buffer.slice(0));
+    p.close();
+    const cfg = SDK.SpeechConfig.fromAuthorizationToken(tk.token, tk.region);
+    cfg.speechRecognitionLanguage = "en-US";
+    rec = new SDK.SpeechRecognizer(cfg, SDK.AudioConfig.fromStreamInput(p));
+    pa.applyTo(rec);
+    const got = [];
+    await new Promise((resolve) => {
+      const t = setTimeout(resolve, 40000);
+      rec.recognized = (_, e) => { if (e.result.reason === SDK.ResultReason.RecognizedSpeech) got.push(e.result); };
+      rec.sessionStopped = () => { clearTimeout(t); resolve(); };
+      rec.canceled = () => { clearTimeout(t); resolve(); };
+      rec.startContinuousRecognitionAsync(() => {}, () => { clearTimeout(t); resolve(); });
+    });
+    try { await new Promise((r) => rec.stopContinuousRecognitionAsync(r, r)); } catch (e) {}
+    // 区切られて複数になったときは、単語の多いものを使う
+    const parsed = got.map((r) => S.parsePron(JSON.parse(r.properties.getProperty(SDK.PropertyId.SpeechServiceResponse_JsonResult)))).filter(Boolean);
+    return parsed.sort((a, b) => b.words.length - a.words.length)[0] || null;
+  } finally {
+    try { rec && rec.close(); } catch (e) {}
+  }
+}
+/* 発音評価が「聞き取れず」になったとき、同じ録音を設定を変えて評価し直す（2026-11-10：
+   発音評価なしなら認識できる録音が、発音評価つきだと聞き取れずになる。お手本と話した内容が一致していても起きる）。
+   どの設定で評価できたかを記録し、最初に評価できた結果を使う。失敗したときだけ、録音の長さ×最大3回分の音声認識を使う */
+async function retryVariants(SDK, tk, pcm, refText, nbest, onStep) {
+  const G = SDK.PronunciationAssessmentGranularity, H = SDK.PronunciationAssessmentGradingSystem.HundredMark;
+  const mk = (gran, miscue) => { const pa = new SDK.PronunciationAssessmentConfig(refText, H, gran, miscue); pa.phonemeAlphabet = "IPA"; if (nbest && gran === G.Phoneme) pa.nbestPhonemeCount = nbest; return pa; };
+  const variants = [
+    ["言い間違い判定なし", () => recognizePcm(SDK, tk, pcm, mk(G.Phoneme, false))],
+    ["単語単位", () => recognizePcm(SDK, tk, pcm, mk(G.Word, true))],
+    ["連続認識", () => recognizePcmContinuous(SDK, tk, pcm, mk(G.Phoneme, true))],
+  ];
+  const log = [];
+  let out = null, via = "";
+  for (const [i, [name, run]] of variants.entries()) {
+    if (out) break; // 評価できたらそこで終わり（全部試すと、その分だけ待ち時間が延びる）
+    if (onStep) onStep(`別の設定で採点し直し中 ${i + 1}/${variants.length}`);
+    try {
+      const r = await run();
+      let parsed = null;
+      if (r && r.words) parsed = r; // 連続認識は parsePron 済み
+      else if (r && r.reason === SDK.ResultReason.RecognizedSpeech) parsed = S.parsePron(JSON.parse(r.properties.getProperty(SDK.PropertyId.SpeechServiceResponse_JsonResult)));
+      if (parsed) { log.push(name + "：成功"); if (!out) { out = parsed; via = name; } }
+      else log.push(name + "：" + (r && r.reason === SDK.ResultReason.NoMatch ? "聞き取れず" : r ? "失敗" : "結果なし"));
+    } catch (e) { log.push(name + "：エラー"); }
+  }
+  return { out, via, log: log.join("、") };
+}
+function paConfig(SDK, refText, nbest) {
+  // 抑揚（Prosody）は追加料金のため使わない。nBestPhonemeCount（話された音の候補）は基本料金の範囲
+  const pa = new SDK.PronunciationAssessmentConfig(refText, SDK.PronunciationAssessmentGradingSystem.HundredMark, SDK.PronunciationAssessmentGranularity.Phoneme, true);
+  pa.phonemeAlphabet = "IPA";
+  if (nbest) pa.nbestPhonemeCount = nbest; // SDK 1.20 以降のプロパティ
+  return pa;
+}
+// 送った音声を、発音評価なしでもう一度認識する（診断用）
+async function plainRecognize(SDK, tk, pcm) {
+  try {
+    const r = await recognizePcm(SDK, tk, pcm, null);
+    if (r.reason === SDK.ResultReason.RecognizedSpeech) return (r.text || "").trim() || "（空）";
+    if (r.reason === SDK.ResultReason.NoMatch) return "聞き取れず（" + noMatchWhy(SDK, r) + "）";
+    const d = SDK.CancellationDetails.fromResult(r);
+    return "エラー（" + (d.errorDetails || d.reason) + "）";
+  } catch (e) {
+    return "エラー（" + (e && e.message ? e.message : e) + "）";
+  }
+}
+function recDiagText(d) {
+  if (!d) return "";
+  const rate = d.trackRate && d.trackRate !== d.ctxRate ? `処理 ${d.ctxRate}Hz／マイク ${d.trackRate}Hz` : `${d.ctxRate}Hz`;
+  return `理由：${d.why}／送った音声 ${d.sentSec}秒・実際 ${d.wallSec}秒（${rate}）／${profText(d.prof, d.gain)}／発音評価なしでの認識：${d.plain || "未実施"}${d.variants ? "／設定を変えた再評価：" + d.variants : ""}／お手本：${d.ref}`;
+}
+// 送った 16kHz の音声を、端末の再生用の周波数に直して鳴らす
+function playRecDiag() {
+  const d = recDiag; if (!d || !d.pcm.length) return;
+  unlockAudio(); if (!audioCtx) return;
+  const n = d.pcm.reduce((s, c) => s + c.length, 0);
+  const rate = audioCtx.sampleRate, m = Math.floor((n * rate) / 16000);
+  const src = new Float32Array(n); let o = 0;
+  for (const c of d.pcm) { for (let i = 0; i < c.length; i++) src[o + i] = c[i] / 32768; o += c.length; }
+  const buf = audioCtx.createBuffer(1, m, rate), ch = buf.getChannelData(0);
+  for (let i = 0; i < m; i++) { const t = (i * 16000) / rate, a = Math.floor(t), f = t - a; ch[i] = (src[a] || 0) * (1 - f) + (src[a + 1] || 0) * f; }
+  playBuffer(buf);
+}
+function recDiagHTML() {
+  if (!recDiag || recording) return "";
+  return `<div class="hintbox" role="note">
+    <div class="row between"><b class="note">🔍 聞き取れなかったときの診断</b><button class="btn sm" id="rec-play">${SPK}今の録音を聞く</button></div>
+    <p class="note" style="margin:4px 0 0;word-break:break-all">${esc(recDiagText(recDiag))}</p></div>`;
+}
+// 録音中にほかのアプリへ切り替えたら録音を打ち切る（戻ったときに固まらないように）
+let abortRec = null;
+
+/* 録音して発音評価を1回行い、parsePron の結果を返す（聞き取れない・エラーのときはバナーを出して null）。
+   シャドーイング（文）と単語の発音練習で共用。recording の切り替えと再描画もここで行う */
+async function assessOnce(refText, opts = {}) {
+  if (recording) return null;
   const SDK = window.SpeechSDK;
-  if (!SDK) { showBanner("音声評価の部品を読み込めていません。ページを開き直してください。"); return; }
+  if (!SDK) { showBanner("音声評価の部品を読み込めていません。ページを開き直してください。"); return null; }
   stopAudio();
   unlockAudio(); // タップの中で AudioContext を起こす（iPhone はタップの外では動き出さない）
-  if (!audioCtx) { showBanner("このブラウザでは録音できません。"); return; }
-  recording = true; renderShadow(); showBanner("");
-  let recognizer = null, mic = null, push = null, timer = null;
+  if (!audioCtx) { showBanner("このブラウザでは録音できません。"); return null; }
+  recording = true; recPhase = "listen"; scoreMsg = ""; recDiag = null; renderShadow(); showBanner("");
+  let recognizer = null, mic = null, push = null, timer = null, out = null, stopped = false;
+  // 録音を止めて採点に移る（「話し終わった」ボタン、自動の区切り、35秒の上限のどれでも）。
+  // 入力を閉じると、Azure は無音を待たずにその時点までの音声で結果を返す
+  const toScore = (msg) => {
+    if (stopped) return; stopped = true;
+    try { mic && mic.close(); } catch (e) {}
+    try { push && push.close(); } catch (e) {}
+    recPhase = "score"; scoreMsg = msg || ""; renderShadow();
+  };
+  const step = (msg) => { scoreMsg = msg; renderShadow(); };
+  stopRec = () => toScore();
   try {
     push = SDK.AudioInputStream.createPushStream(SDK.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
     mic = await openMic((buf) => { try { push.write(buf); } catch (e) {} }, updateMeter);
+    abortRec = () => { try { mic.close(); push.close(); } catch (e) {} };
+    if (stopped) { try { mic.close(); } catch (e) {} } // マイクの準備中に止めた
     const tk = await speechToken();
     const cfg = SDK.SpeechConfig.fromAuthorizationToken(tk.token, tk.region);
     cfg.speechRecognitionLanguage = "en-US";
+    // 文の途中の息継ぎで切れないよう、区切りの無音を 3 秒に（既定は約 0.5 秒、設定できる範囲は 100〜5000 ミリ秒）。
+    // 普段は「話し終わった」ボタンで入力を閉じるので、この 3 秒を待つことはない
+    cfg.setProperty(SDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, "3000");
     const audio = SDK.AudioConfig.fromStreamInput(push);
-    const pa = new SDK.PronunciationAssessmentConfig(sCur.text, SDK.PronunciationAssessmentGradingSystem.HundredMark, SDK.PronunciationAssessmentGranularity.Phoneme, true);
-    pa.phonemeAlphabet = "IPA";
-    // 抑揚（Prosody）は追加料金のため使わない
+    const pa = paConfig(SDK, refText, opts.nbestPhonemes);
     recognizer = new SDK.SpeechRecognizer(cfg, audio);
     pa.applyTo(recognizer);
     // 1文30秒以内。万一終わらないときは 35 秒で入力を閉じて結果を受け取る
-    timer = setTimeout(() => { try { mic && mic.close(); push.close(); } catch (e) {} }, 35000);
+    timer = setTimeout(() => toScore(), 35000);
     const result = await new Promise((resolve, reject) => recognizer.recognizeOnceAsync(resolve, reject));
+    toScore(); // 3 秒の無音で自動的に区切られたときも、ここでマイクを止めて採点中の表示にする
     if (result.reason === SDK.ResultReason.RecognizedSpeech) {
       const json = JSON.parse(result.properties.getProperty(SDK.PropertyId.SpeechServiceResponse_JsonResult));
-      const r = S.parsePron(json);
-      if (!r) throw new Error("no_result");
-      const j = S.judgeScore(r, st().strictness);
-      r.judge = j.score; r.ngCount = j.ng;
-      sResult = r; openWord = r.words.findIndex((w) => S.wordClass(w, st().strictness) === "ng");
-      // 「今回の最高」は判定点で比べる。同点なら要練習の単語が少ない方
-      if (sBest == null || r.judge > sBest || (r.judge === sBest && r.ngCount < sBestNg)) { sBest = r.judge; sBestNg = r.ngCount; }
-      queueSave(() => api("attempts", { method: "POST", body: JSON.stringify({ sentenceId: sCur.id, text: sCur.text, pron: r.pron, judge: r.judge, strictness: st().strictness, acc: r.acc, flu: r.flu, comp: r.comp, recognized: r.recognized, words: r.words }) }));
+      out = S.parsePron(json);
+      if (!out) throw new Error("no_result");
     } else if (result.reason === SDK.ResultReason.NoMatch) {
-      // マイクの音量がほぼゼロなら、声の大きさではなく録音そのものの問題
-      showBanner(mic && mic.peak < 0.01
-        ? `マイクの音がほとんど入っていません（最大音量 ${(mic.peak * 100).toFixed(1)}%）。ほかのアプリがマイクを使っていないか確認して、ページを開き直してください。`
-        : mic && mic.maxDb < OK_DB
-          ? `声が小さかったようです（最大 ${mic.maxDb.toFixed(0)}dB、目安 ${OK_DB}dB）。マイクに近づくか、「マイクの感度」を上げてもう一度話してください。`
-          : "声を聞き取れませんでした。マイクに近づいて、もう一度話してください。");
+      const why = noMatchWhy(SDK, result);
+      recDiag = { why, plain: "", ...micStats(mic), pcm: mic.pcm, ref: refText };
+      // 音が入っていれば、同じ音声を発音評価なしで認識し直す（発音評価が原因かどうかの切り分け。F0 は同時1件なので先に閉じる）
+      if (mic.peak >= 0.01 && mic.pcm.length) {
+        try { recognizer.close(); } catch (e) {}
+        recognizer = null;
+        recDiag.plain = "確認中…";
+        step("聞き取れなかったので、原因を確認中");
+        recDiag.plain = await plainRecognize(SDK, tk, mic.pcm);
+        // 発音評価なしで言葉が取れたときだけ、設定を変えて評価し直す
+        if (!/^(聞き取れず|エラー|（空）)/.test(recDiag.plain)) {
+          const v = await retryVariants(SDK, tk, mic.pcm, refText, opts.nbestPhonemes, step);
+          recDiag.variants = v.log;
+          lastVariantDiag = `${new Date().toLocaleTimeString()} お手本「${refText}」 ${v.log}`;
+          if (v.out) { out = v.out; out.via = v.via; }
+        }
+      }
+      if (out) {
+        // 設定を変えて評価できた。結果を使い、どの設定だったかを上に出す（原因の手がかり）
+        showBanner(`（診断）通常の設定では聞き取れず、「${out.via}」で評価しました。${recDiag.variants}`);
+        recDiag = null;
+      } else {
+        // マイクの音量がほぼゼロなら、声の大きさではなく録音そのものの問題。
+        // 「声が小さい」と出すのは、Azure が無音と判断したときだけ（音があるのに認識できないときは別の原因）
+        showBanner(mic.peak < 0.01
+          ? `マイクの音がほとんど入っていません（最大音量 ${(mic.peak * 100).toFixed(1)}%）。ほかのアプリがマイクを使っていないか確認して、ページを開き直してください。`
+          : mic.maxDb < OK_DB && why === "無音と判定"
+            ? `声が小さかったようです（最大 ${mic.maxDb.toFixed(0)}dB、目安 ${OK_DB}dB）。マイクに近づくか、「マイクの感度」を上げてもう一度話してください。`
+            : "声を聞き取れませんでした。マイクに近づいて、もう一度話してください。");
+      }
     } else {
       const d = SDK.CancellationDetails.fromResult(result);
       showBanner(/429|Too many/i.test(d.errorDetails || "") ? "混み合っています。数秒おいてもう一度試してください。" : "評価できませんでした（" + (d.errorDetails || d.reason) + "）");
       if (/401|auth/i.test(d.errorDetails || "")) tokenCache = null;
     }
   } catch (e) {
-    if (e && e.message !== "auth") showBanner(/Permission|NotAllowed/i.test(String(e)) ? "マイクの使用を許可してください。" : "評価できませんでした。もう一度試してください。");
+    out = null;
+    if (e && e.message === "mic_stall") showBanner(MIC_STALL_MSG);
+    else if (e && e.message !== "auth") showBanner(/Permission|NotAllowed/i.test(String(e)) ? "マイクの使用を許可してください。" : "評価できませんでした。もう一度試してください。");
   } finally {
     clearTimeout(timer);
-    if (mic) { lastPeak = mic.peak; lastMaxDb = mic.maxDb; }
+    abortRec = null; stopRec = null;
+    if (mic) { lastPeak = mic.peak; lastMaxDb = mic.maxDb; lastStats = { ...micStats(mic), ok: !!out }; }
     try { mic && mic.close(); } catch (e) {}
     try { push && push.close(); } catch (e) {}
     try { recognizer && recognizer.close(); } catch (e) {}
     resetOutput(); // 受話口に向いたままにしない
-    recording = false; renderShadow();
+    recording = false; recPhase = ""; scoreMsg = "";
     // マイクを許可した後は出力先の名前も取れるので、一覧を取り直す
     refreshOutputs().then(() => { if (!recording) renderShadow(); });
   }
+  return out;
+}
+
+async function startAssessment() {
+  if (recording || !sCur) return;
+  const target = sCur;
+  const r = await assessOnce(target.text);
+  if (r && sCur === target) {
+    const j = S.judgeScore(r, st().strictness);
+    r.judge = j.score; r.ngCount = j.ng;
+    sResult = r; drill = null; openWord = r.words.findIndex((w) => S.wordClass(w, st().strictness) === "ng");
+    // 「今回の最高」は判定点で比べる。同点なら要練習の単語が少ない方
+    if (sBest == null || r.judge > sBest || (r.judge === sBest && r.ngCount < sBestNg)) { sBest = r.judge; sBestNg = r.ngCount; }
+    queueSave(() => api("attempts", { method: "POST", body: JSON.stringify({ sentenceId: target.id, text: target.text, pron: r.pron, judge: r.judge, strictness: st().strictness, acc: r.acc, flu: r.flu, comp: r.comp, recognized: r.recognized, words: r.words }) }));
+  }
+  renderShadow();
 }
 
 function nextSentence() {
@@ -521,17 +895,586 @@ function nextSentence() {
   if (sBest != null) {
     const prev = data.cards.sentence[s.id];
     const wasNew = !prev;
-    const g = S.gradeFromScore(sBest, sBestNg, st().strictness);
-    const next = S.nextState(prev, g);
+    // フレーズ帳で「言えなかった」ときは、発音の点にかかわらず「もう一度」（明日また思い出す）
+    const g = recallOf(s) === "ng" ? "again" : S.gradeFromScore(sBest, sBestNg, st().strictness);
+    // 苦手な音の練習で足した文（復習の時期がまだ来ていない）は、予定を進めない。最高点は記録し、「もう一度」なら明日に前倒し
+    const extra = sExtra.has(s.id) && prev && prev.due > Date.now();
+    if (!extra) noteRetention("sentence", prev, g);
+    const next = extra ? (g === "again" ? S.applyTalkUse(prev, false) : { ...prev }) : S.nextState(prev, g);
     next.best = Math.max(prev && prev.best != null ? prev.best : 0, sBest);
     data.cards.sentence[s.id] = next;
     saveCard("sentence", s.id);
     if (wasNew) { bumpLog("newSentLog"); saveSettings(); }
-    if (g === "again") sQueue.splice(Math.min(3, sQueue.length), 0, s);
+    // その場で出し直すのは1回だけ（2回目の「もう一度」は明日に回す）
+    if (g === "again" && !sRetried.has(s.id)) { sRetried.add(s.id); sQueue.splice(Math.min(3, sQueue.length), 0, s); }
     sDone++;
   }
   sCur = sQueue.shift() || null; sBest = null; sBestNg = 0; sResult = null; openWord = -1;
+  sRecall = { id: null, state: "ask" }; // 出し直しのときも、もう一度思い出すところから
   renderShadow();
+}
+
+/* ================= 会話ロールプレイ（Phase 2a） =================
+   場面を選ぶ → 相手（AI）の最初の一言 → 「話す」で返事 → 相手の返事（読み上げ） … → 振り返り
+   相手の発言は、最初は文字を隠す（聞き取り重視）。録音はシャドーイングと同じ仕組み（音量メーター・感度） */
+let scenes = null, talk = null;
+const micBusy = () => recording || !!(talk && talk.listening) || !!(comp && comp.state === "listening");
+async function loadScenes() {
+  if (scenes) return scenes;
+  try { scenes = await (await fetch("/seed/scenes.json", { cache: "no-store" })).json(); } catch (e) { scenes = []; }
+  return scenes;
+}
+function talkCountToday() { const l = st().talkLog; return l && l.date === S.ymd() ? l.count : 0; }
+const myTalkTurns = () => (talk ? talk.history.filter((t) => t.who === "me").length : 0);
+const TALK_MAX = 8; // api/src/roleplay.js の MAX_TURNS と同じ
+// 同じ場面でも毎回少し変える：相手の性格（ここから1つ）と、場面の変化球（scenes.json の twists から1つ）
+const PERSONAS = ["friendly and patient", "busy and a bit brief", "talkative and speaks a little fast", "curious and asks a lot of questions", "calm and polite"];
+
+async function renderTalk() {
+  const v = $("view-talk");
+  counts();
+  if (!talk) {
+    const list = await loadScenes();
+    if (talk) return renderTalk();
+    // 今日の新しい場面 → 最近7日 → 分野ごと（場面が多い分野は折りたたむ）
+    const today = S.ymd(), weekAgo = S.ymd(Date.now() - 7 * 86400000);
+    const btn = (sc) => `<button class="scene-btn" data-scene="${esc(sc.id)}"><span class="scene-emoji" aria-hidden="true">${esc(sc.emoji || "💬")}</span>
+        <span class="grow"><b>${esc(sc.title)}</b><span class="note" style="display:block">${esc(sc.goal_ja || "")}</span>${(sc.targets || []).length ? `<span class="note targets">使ってみたい表現：${sc.targets.map(esc).join(" / ")}</span>` : ""}</span></button>`;
+    const isNew = list.filter((sc) => sc.added === today);
+    const recent = list.filter((sc) => sc.added && sc.added < today && sc.added >= weekAgo).sort((a, b) => (b.added > a.added ? 1 : -1));
+    const groups = [...new Set(list.map((sc) => sc.group || "その他"))];
+    setTimeout(() => { const pb = $("phrasebook"); if (pb) pb.ontoggle = () => (pbOpen = pb.open); });
+    v.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+      <article class="card" style="gap:8px"><h2 style="margin:0;font-size:18px">場面を選んで会話する</h2>
+        <p class="note" style="margin:0">1日1回・10分ほどが目安です（今日 ${talkCountToday()} 回）。場面は毎日1つ増え、同じ場面でも毎回少し展開が変わります。相手の発言は最初は文字を隠しています。</p></article>
+      ${phrasebookHTML()}
+      ${isNew.length ? `<h3 class="scene-group">🆕 今日の新しい場面</h3><div class="scene-list">${isNew.map(btn).join("")}</div>` : ""}
+      ${recent.length ? `<h3 class="scene-group">最近の場面</h3><div class="scene-list">${recent.map(btn).join("")}</div>` : ""}
+      ${groups.map((g) => { const items = list.filter((sc) => (sc.group || "その他") === g).sort((a, b) => ((b.added || "") > (a.added || "") ? 1 : -1));
+        return `<details class="scene-fold" ${items.length <= 10 ? "open" : ""}><summary class="scene-group">${esc(g)}（${items.length}）</summary><div class="scene-list" style="margin-top:8px">${items.map(btn).join("")}</div></details>`; }).join("") || emptyCard("場面を読み込めませんでした", "ページを開き直してください。")}
+    </div>`;
+    return;
+  }
+  const sc = talk.scene;
+  if (talk.review) return renderTalkReview(v);
+  const ended = talk.ended || myTalkTurns() >= TALK_MAX;
+  const bubbles = talk.history.map((t, i) => t.who === "ai"
+    ? `<div class="bubble ai"><div class="${t.shown ? "" : "veil"}" ${t.shown ? "" : 'aria-label="文字は隠れています"'}>${esc(t.text)}</div>
+        <div class="tools"><button class="iconbtn" data-say="${esc(t.text)}" aria-label="もう一度聞く">${SPK}</button><button class="iconbtn" data-say="${esc(t.text)}" data-rate="0.7" aria-label="ゆっくり聞く">${SLOW}</button><button class="linkbtn" data-say="${esc(t.text)}" data-rate="0.5">さらにゆっくり</button>
+        ${t.shown ? "" : `<button class="linkbtn" data-reveal="${i}">文字を見る</button>`}${t.ja ? `<button class="linkbtn" data-talk-ja="${i}" aria-expanded="${t.jaShown ? "true" : "false"}">${t.jaShown ? "訳を隠す" : "訳を見る"}</button>` : ""}</div>
+        ${t.ja && t.jaShown ? `<p class="tr" style="margin:4px 0 0">${esc(t.ja)}</p>` : ""}
+        ${t.help ? `<p class="help">💡 ${esc(t.help)}</p>` : ""}</div>`
+    : `<div class="bubble me">${esc(t.text)}</div>`).join("");
+  v.innerHTML = `<article class="card talk">
+    <div class="row between"><span class="chip">${esc(sc.emoji || "")} ${esc(sc.title)}</span><button class="linkbtn" id="talk-quit">やめる</button></div>
+    <p class="note" style="margin:0">目的：${esc(sc.goal_ja || "")}</p>
+    ${talk.targets.length ? `<p class="note targets" style="margin:0">使ってみたい表現：${talk.targets.map((t) => `<b>${esc(t)}</b>${talk.spaced.includes(t) ? '<span class="note">（復習）</span>' : ""}`).join(" / ")}</p>` : ""}
+    <details id="talk-phrases" ${talk.phrasesOpen ? "open" : ""}><summary class="note">使えるフレーズ</summary><div class="list" style="margin-top:6px">${(sc.phrases || []).map((p) => `<div class="li"><button class="iconbtn" data-say="${esc(p.en)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="s">${esc(p.en)}</div><div class="m">${esc(p.ja)}</div></div>${saveBtn(p.en, p.ja, "scene")}</div>`).join("")}</div></details>
+    <div class="talk-log" aria-live="polite">${bubbles}${talk.waiting ? '<div class="bubble ai note">…</div>' : ""}</div>
+    ${talk.hint ? `<div class="hintbox"><div class="row between"><b>${esc(talk.hint.en)}</b><button class="iconbtn" data-say="${esc(talk.hint.en)}" aria-label="読み上げ">${SPK}</button></div>
+      ${talk.hint.alt ? `<p class="note" style="margin:4px 0 0">別の言い方：${esc(talk.hint.alt)}</p>` : ""}${talk.hint.note ? `<p class="note" style="margin:2px 0 0">${esc(talk.hint.note)}</p>` : ""}<div style="margin-top:4px">${saveBtn(talk.hint.en, talk.hintJa || "", "hint")}</div></div>` : ""}
+    ${ended
+      ? `<p class="note" style="margin:0">${talk.goalReached ? "🎉 目的を達成しました。" : "会話はここまでです。"}振り返りをしましょう。</p>`
+      : `<button class="btn primary ${talk.listening ? "rec" : ""}" id="talk-rec" ${talk.listening || talk.waiting ? "disabled" : ""}>${MIC}${talk.listening ? "聞き取り中…話し終わると自動で止まります" : talk.waiting ? "相手が考えています…" : "話す"}</button>
+        ${talk.listening ? `<div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div><p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>` : ""}
+        <div class="row">${talk.hintOpen
+          ? `<input id="hint-ja" class="textin" placeholder="言いたいことを日本語で" maxlength="200"><button class="btn" id="hint-go">英語にする</button>`
+          : `<button class="btn" id="hint-open">💡 日本語で言いたいこと</button>`}</div>`}
+    <button class="btn ${ended ? "primary" : ""}" id="talk-review" ${myTalkTurns() && !talk.waiting && !talk.listening ? "" : "disabled"}>終わって振り返る</button>
+  </article>`;
+  $("talk-phrases").ontoggle = () => { talk.phrasesOpen = $("talk-phrases").open; };
+  $("talk-quit").onclick = () => { if (!talk.listening && (!myTalkTurns() || confirm("会話をやめますか？（振り返りはしません）"))) { stopAudio(); talk = null; renderTalk(); } };
+  if ($("talk-rec")) $("talk-rec").onclick = talkListen;
+  if ($("hint-open")) $("hint-open").onclick = () => { talk.hintOpen = true; renderTalk().then(() => $("hint-ja") && $("hint-ja").focus()); };
+  if ($("hint-go")) $("hint-go").onclick = talkHint;
+  if ($("hint-ja")) $("hint-ja").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) talkHint(); };
+  $("talk-review").onclick = talkReview;
+  v.querySelectorAll("[data-reveal]").forEach((b) => (b.onclick = () => { talk.history[+b.dataset.reveal].shown = true; renderTalk(); }));
+  v.querySelectorAll("[data-talk-ja]").forEach((b) => (b.onclick = () => { const t = talk.history[+b.dataset.talkJa]; t.jaShown = !t.jaShown; renderTalk(); }));
+  const log = v.querySelector(".talk-log"); if (log && log.lastElementChild) log.lastElementChild.scrollIntoView({ block: "nearest" });
+}
+
+function renderTalkReview(v) {
+  const r = talk.review, sc = talk.scene;
+  v.innerHTML = `<article class="card talk">
+    <div class="row between"><span class="chip">${esc(sc.emoji || "")} ${esc(sc.title)}・振り返り</span>${r.goal_reached ? '<span class="chip">🎉 目的達成</span>' : ""}</div>
+    ${r.summary_ja ? `<p style="margin:0">${esc(r.summary_ja)}</p>` : ""}
+    ${(r.targets || []).length ? `<div><b class="note">使ってみたい表現</b><div class="row" style="margin-top:4px">${r.targets.map((t) => `<span class="chip ${(r.targets_used || []).includes(t) ? "used" : ""}">${(r.targets_used || []).includes(t) ? "✓" : "–"} ${esc(t)}</span>`).join("")}</div>
+      ${(r.wordUpdates || []).length ? `<p class="note" style="margin:6px 0 0">単語帳に反映：${r.wordUpdates.map((u) => `${esc(u.word)} → ${u.used ? "使えたので次回を " + u.when + " に" : "次回を " + u.when + " に前倒し"}`).join("、")}</p>` : ""}</div>` : ""}
+    ${r.good.length ? `<div><b class="note">よかった点</b><ul class="rv">${r.good.map((g) => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}
+    ${r.corrections.length ? `<div><b class="note">もっと自然な言い方</b><div class="list" style="margin-top:6px">${r.corrections.map((c) => `<div class="li"><div class="grow"><div class="m">あなた：${esc(c.you)}</div><div class="s">→ ${esc(c.better)}</div>${c.note ? `<div class="m">${esc(c.note)}</div>` : ""}</div><button class="iconbtn" data-say="${esc(c.better)}" aria-label="読み上げ">${SPK}</button>${saveBtn(c.better, "", "correction", c.you)}</div>`).join("")}</div></div>` : ""}
+    ${r.phrases.length ? `<div><b class="note">覚えたいフレーズ</b><div class="list" style="margin-top:6px">${r.phrases.map((p) => `<div class="li"><button class="iconbtn" data-say="${esc(p.en)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="s">${esc(p.en)}</div><div class="m">${esc(p.ja)}</div></div>${saveBtn(p.en, p.ja, "review")}</div>`).join("")}</div>
+      <p class="note" style="margin:6px 0 0">「＋保存」でフレーズ帳に入り、シャドーイングで練習できます。</p></div>` : ""}
+    <details><summary class="note">会話の全文</summary><div class="talk-log" style="margin-top:8px">${talk.history.map((t) => `<div class="bubble ${t.who}">${esc(t.text)}${t.ja ? `<p class="tr" style="margin:4px 0 0">${esc(t.ja)}</p>` : ""}</div>`).join("")}</div></details>
+    <div class="row"><button class="btn primary" id="talk-again" style="width:auto;flex:1">同じ場面をもう一度</button><button class="btn" id="talk-menu">場面を選ぶ</button></div>
+  </article>`;
+  $("talk-again").onclick = () => startTalk(sc.id);
+  $("talk-menu").onclick = () => { talk = null; renderTalk(); };
+}
+
+/* 使ってみたい表現：場面の表現（その日の単語）を最大2つ ＋ 単語帳で復習の時期が近い語を1〜2つ（合計3つまで）。
+   覚えた語を、日をあけて別の場面で思い出して使う練習にする */
+function talkTargets(sc) {
+  const own = (sc.targets || []).slice(0, 2);
+  const spaced = S.pickSpacedWords(data.words, data.cards.word, own, 3 - own.length).map((w) => w.word);
+  return { targets: [...own, ...spaced], spaced };
+}
+const findWordByText = (t) => data.words.find((w) => String(w.word).toLowerCase() === String(t).toLowerCase());
+/* 振り返りの結果を単語帳の予定に反映（使えた：次回を延ばす／使えなかった：明日に前倒し）。まだ覚えていない語は対象外 */
+function applyTalkToWords(r) {
+  const out = [];
+  for (const t of r.targets || []) {
+    const w = findWordByText(t); if (!w) continue;
+    const used = (r.targets_used || []).includes(t);
+    const next = S.applyTalkUse(data.cards.word[w.id], used);
+    if (!next) continue;
+    const changed = next.due !== data.cards.word[w.id].due;
+    data.cards.word[w.id] = next;
+    if (changed) saveCard("word", w.id);
+    const d = new Date(next.due);
+    out.push({ word: w.word, used, when: `${d.getMonth() + 1}/${d.getDate()}` });
+  }
+  return out;
+}
+
+function startTalk(id) {
+  const sc = (scenes || []).find((x) => x.id === id); if (!sc) return;
+  stopAudio(); showBanner("");
+  const pick = (a) => (a && a.length ? a[Math.floor(Math.random() * a.length)] : "");
+  const tg = talkTargets(sc);
+  talk = { scene: sc, targets: tg.targets, spaced: tg.spaced, twist: pick(sc.twists), persona: pick(PERSONAS), history: [{ who: "ai", text: sc.opener, ja: sc.opener_ja || "", shown: false }], listening: false, waiting: false, ended: false, goalReached: false, hint: null, hintOpen: false, review: null };
+  renderTalk();
+  say(sc.opener, 0.9);
+}
+
+async function talkApi(body) {
+  try {
+    const scene = { ...talk.scene, targets: talk.targets, twist: talk.twist, persona: talk.persona };
+    return await api("roleplay", { method: "POST", body: JSON.stringify({ scene, history: talk.history.map(({ who, text }) => ({ who, text })), ...body }) });
+  } catch (e) {
+    showBanner(e.status === 429 ? "今日の会話の上限に達しました。また明日どうぞ。" : e.status === 503 ? "AI の設定（FOUNDRY_ENDPOINT など）がないため、会話できません。" : "AI の応答を受け取れませんでした。もう一度試してください。");
+    throw e;
+  }
+}
+
+/* 録音して文字にする（発音評価なし）。会話と瞬間作文で共用。呼ぶ前に「聞き取り中」の画面（音量メーター）を出しておく。
+   聞き取れなかったときは理由をバナーに出して "" を返す */
+async function listenText() {
+  const SDK = window.SpeechSDK;
+  let recognizer = null, mic = null, push = null, timer = null, text = "";
+  try {
+    push = SDK.AudioInputStream.createPushStream(SDK.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
+    mic = await openMic((buf) => { try { push.write(buf); } catch (e) {} }, updateMeter);
+    abortRec = () => { try { mic.close(); push.close(); } catch (e) {} };
+    const tk = await speechToken();
+    const cfg = SDK.SpeechConfig.fromAuthorizationToken(tk.token, tk.region);
+    cfg.speechRecognitionLanguage = "en-US";
+    recognizer = new SDK.SpeechRecognizer(cfg, SDK.AudioConfig.fromStreamInput(push));
+    timer = setTimeout(() => { try { mic && mic.close(); push.close(); } catch (e) {} }, 35000);
+    const result = await new Promise((resolve, reject) => recognizer.recognizeOnceAsync(resolve, reject));
+    if (result.reason === SDK.ResultReason.RecognizedSpeech) text = (result.text || "").trim();
+    else if (result.reason === SDK.ResultReason.NoMatch) {
+      showBanner(mic && mic.maxDb < OK_DB ? `声が小さかったようです（最大 ${mic.maxDb.toFixed(0)}dB）。マイクに近づくか、「マイクの感度」を上げてもう一度話してください。` : "聞き取れませんでした。もう一度話してください。");
+    } else {
+      const d = SDK.CancellationDetails.fromResult(result);
+      showBanner("聞き取れませんでした（" + (d.errorDetails || d.reason) + "）");
+      if (/401|auth/i.test(d.errorDetails || "")) tokenCache = null;
+    }
+  } catch (e) {
+    if (e && e.message === "mic_stall") showBanner(MIC_STALL_MSG);
+    else showBanner(/Permission|NotAllowed/i.test(String(e)) ? "マイクの使用を許可してください。" : "聞き取れませんでした。もう一度試してください。");
+  } finally {
+    clearTimeout(timer);
+    abortRec = null;
+    if (mic) { lastPeak = mic.peak; lastMaxDb = mic.maxDb; lastStats = micStats(mic); }
+    try { mic && mic.close(); } catch (e) {}
+    try { push && push.close(); } catch (e) {}
+    try { recognizer && recognizer.close(); } catch (e) {}
+    // このあと結果を読み上げることがあるので、AudioContext は閉じない（iPhone はタップの外で作り直すと鳴らない）
+    setAudioSession("playback");
+  }
+  return text;
+}
+async function talkListen() {
+  if (!talk || micBusy()) return;
+  const SDK = window.SpeechSDK;
+  if (!SDK) { showBanner("音声認識の部品を読み込めていません。ページを開き直してください。"); return; }
+  stopAudio();
+  unlockAudio();
+  if (!audioCtx) { showBanner("このブラウザでは録音できません。"); return; }
+  talk.listening = true; talk.hint = null; talk.hintOpen = false; renderTalk(); showBanner("");
+  const text = await listenText();
+  if (talk) talk.listening = false;
+  if (!talk) return;
+  if (!text) { renderTalk(); return; }
+  talk.history.push({ who: "me", text });
+  talk.waiting = true; renderTalk();
+  try {
+    const r = await talkApi({ action: "turn" });
+    if (!talk) return;
+    talk.history.push({ who: "ai", text: r.reply, ja: r.reply_ja || "", shown: false, help: r.help_ja || "" });
+    talk.goalReached = talk.goalReached || !!r.goal_reached;
+    talk.ended = !!r.end || myTalkTurns() >= TALK_MAX;
+    say(r.reply, 0.9);
+  } catch (e) {
+    talk.history.pop(); // 送れなかった発言は取り消して、もう一度話せるようにする
+  } finally {
+    if (talk) { talk.waiting = false; renderTalk(); }
+  }
+}
+
+async function talkHint() {
+  const ja = ($("hint-ja") && $("hint-ja").value.trim()) || "";
+  if (!ja || !talk || talk.waiting) return;
+  talk.waiting = true; renderTalk();
+  try { const r = await talkApi({ action: "hint", ja }); if (talk) { talk.hint = r; talk.hintJa = ja; talk.hintOpen = false; } }
+  catch (e) {}
+  finally { if (talk) { talk.waiting = false; renderTalk(); } }
+}
+
+async function talkReview() {
+  if (!talk || !myTalkTurns() || talk.waiting) return;
+  stopAudio();
+  talk.waiting = true; renderTalk();
+  try {
+    const r = await talkApi({ action: "review" });
+    if (!talk) return;
+    talk.review = r;
+    talk.review.wordUpdates = applyTalkToWords(r);
+    const today = S.ymd();
+    if (!st().talkLog || st().talkLog.date !== today) st().talkLog = { date: today, count: 0 };
+    st().talkLog.count++; saveSettings();
+  } catch (e) {}
+  finally { if (talk) { talk.waiting = false; renderTalk(); } }
+}
+
+/* ================= フレーズ帳（Phase 2b） =================
+   会話の振り返り（覚えたいフレーズ・言い換え）、場面の「使えるフレーズ」、日本語ヒントから保存する。
+   保存した表現はシャドーイングの会話文として出題する（間隔反復と発音評価をそのまま使う） */
+let pbOpen = false; // フレーズ帳の開閉（描き直しても保つ）
+const normEn = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+function phraseToSentence(p) {
+  return { id: p.id, text: p.text, ja: p.ja || "", before: p.before || "", scene: p.scene || "フレーズ帳", category: "conversation", focus: [], source: "フレーズ帳", order: -1, phrase: true };
+}
+const isSaved = (en) => data.phrases.some((p) => normEn(p.text) === normEn(en));
+function saveBtn(en, ja, from, before = "") {
+  if (!en) return "";
+  return isSaved(en)
+    ? `<span class="note saved">✓ 保存済み</span>`
+    : `<button class="linkbtn save-ph" data-phrase="${esc(en)}" data-ja="${esc(ja || "")}" data-before="${esc(before)}" data-from="${from}">＋保存</button>`;
+}
+async function savePhrase(btn) {
+  btn.disabled = true;
+  try {
+    const sc = talk && talk.scene;
+    const r = await api("phrase", { method: "POST", body: JSON.stringify({ text: btn.dataset.phrase, ja: btn.dataset.ja, before: btn.dataset.before || "", from: btn.dataset.from, scene: sc ? sc.title : "", sceneId: sc ? sc.id : "" }) });
+    if (r && r.item && !data.phrases.some((p) => p.id === r.item.id)) {
+      data.phrases.push(r.item);
+      const s = phraseToSentence(r.item);
+      data.sentences.push(s);
+      if (!data.cards.sentence[s.id]) { if (sCur) sQueue.push(s); else sCur = s; } // 今日のシャドーイングの最後に足す
+    }
+    showBanner("フレーズ帳に保存しました。シャドーイングで練習できます。");
+  } catch (e) {
+    showBanner(e.status === 409 ? "フレーズ帳がいっぱいです（500件まで）。使わないものを削除してください。" : "保存できませんでした。もう一度試してください。");
+  }
+  renderTalk(); counts();
+}
+async function deletePhrase(id) {
+  const p = data.phrases.find((x) => x.id === id); if (!p) return;
+  if (!confirm(`「${p.text}」をフレーズ帳から削除しますか？（練習の記録も消えます）`)) return;
+  try {
+    await api("phrase/" + encodeURIComponent(id), { method: "DELETE" });
+    data.phrases = data.phrases.filter((x) => x.id !== id);
+    data.sentences = data.sentences.filter((x) => x.id !== id);
+    sQueue = sQueue.filter((x) => x.id !== id);
+    if (sCur && sCur.id === id) { sCur = sQueue.shift() || null; sResult = null; sBest = null; }
+    delete data.cards.sentence[id];
+  } catch (e) { showBanner("削除できませんでした。もう一度試してください。"); }
+  renderTalk(); counts();
+}
+function phrasebookHTML() {
+  const ps = data.phrases || [];
+  const scenesOf = [...new Set(ps.map((p) => p.scene || "フレーズ帳"))];
+  return `<details class="card phrasebook" id="phrasebook" ${pbOpen ? "open" : ""}><summary><b>📒 フレーズ帳</b> <span class="note">${ps.length} 件</span></summary>
+    ${ps.length ? scenesOf.map((g) => `<h3 class="scene-group">${esc(g)}</h3><div class="list">${ps.filter((p) => (p.scene || "フレーズ帳") === g).slice().reverse().map((p) => {
+      const c = data.cards.sentence[p.id];
+      return `<div class="li"><button class="iconbtn" data-say="${esc(p.text)}" aria-label="読み上げ">${SPK}</button>
+        <div class="grow"><div class="s">${esc(p.text)}</div>${p.ja ? `<div class="m">${esc(p.ja)}</div>` : ""}<div class="m">${c ? (c.best != null ? `最高 ${c.best} 点・` : "") + "次回 " + S.ymd(c.due) : "まだ練習していません"}</div></div>
+        <button class="linkbtn" data-del-phrase="${esc(p.id)}" aria-label="削除">削除</button></div>`; }).join("")}</div>`).join("")
+      : `<p class="note" style="margin:8px 0 0">会話の振り返りや「使えるフレーズ」の「＋保存」で、ここに集まります。保存した表現はシャドーイングにも出てきます。</p>`}
+  </details>`;
+}
+
+/* ================= 瞬間作文（Phase 3a） =================
+   日本語を見て、英語を声に出す（タイピングも可）→ 判定 → お手本と自然な言い方。独自の間隔反復で出題する。
+   出題：単語帳で覚えた単語の例文、練習したシャドーイングの文、フレーズ帳（訳があるもの） */
+let comp = null; // { queue, cur, state: ask|listening|typing|judging|result, answer, result, done, retried:Set }
+const COMPOSE_GRADE = { correct: "good", ok: "hard", wrong: "again" };
+function composeItems() {
+  const out = [];
+  for (const w of data.words) if (data.cards.word[w.id] && w.example && w.translation)
+    out.push({ id: "w-" + w.id, cat: "word", ja: w.translation, en: w.example, target: w.word, label: "単語の例文", order: w.order || 0 });
+  for (const x of data.sentences) if (data.cards.sentence[x.id] && x.ja && x.text)
+    out.push({ id: (x.phrase ? "p-" : "s-") + x.id, cat: "sentence", ja: x.ja, en: x.text, target: "", label: x.phrase ? "フレーズ帳" : "シャドーイングの文", order: x.phrase ? -1 : 0 });
+  return out;
+}
+/* 今週のまとめ：直近7日に覚え始めた（初めて答えた）単語・フレーズ・文から10問。足りなければ覚えたものから補う。
+   いつ覚え始めたかはカードの first、なければ教材の追加日（added）で判断する */
+function weeklyItems() {
+  const since = S.ymd(Date.now() - 7 * S.DAY);
+  const recentOf = (card, added) => ((card && card.first) || added || "") >= since;
+  const phraseAdded = Object.fromEntries(data.phrases.map((p) => [p.id, p.added]));
+  const isRecent = (it) => {
+    const raw = it.id.slice(2);
+    if (it.id.startsWith("w-")) { const w = data.words.find((x) => x.id === raw); return recentOf(data.cards.word[raw], w && w.added); }
+    const x = data.sentences.find((y) => y.id === raw);
+    return recentOf(data.cards.sentence[raw], (x && x.added) || phraseAdded[raw]);
+  };
+  const all = composeItems();
+  return [...shuffle(all.filter(isRecent)), ...shuffle(all.filter((x) => !isRecent(x)))].slice(0, 10);
+}
+function saveWeekly() {
+  const t = comp.tally, w = (st().weekly = st().weekly || {});
+  w[S.weekStart()] = { n: comp.done, correct: t.correct || 0, ok: t.ok || 0, wrong: t.wrong || 0, at: new Date().toISOString() };
+  for (const k of Object.keys(w).sort().slice(0, -12)) delete w[k];
+  saveSettings();
+}
+const composeQueue = () => S.buildQueue(composeItems(), data.cards.compose, st().composeLog, st().composePerDay, "cat", "word", "sentence");
+function startCompose(items = null, mode = "daily") {
+  const q = items || composeQueue();
+  comp = { mode, queue: q.slice(1), cur: q[0] || null, state: "ask", answer: "", result: null, done: 0, retried: new Set(), tally: {} };
+  showBanner(""); renderCompose();
+}
+function renderCompose() {
+  const v = $("view-quiz");
+  if (!comp) return renderQuizMenu();
+  const it = comp.cur;
+  if (!it) {
+    const wk = comp.mode === "weekly", t = comp.tally;
+    if (wk && comp.done && !comp.saved) { comp.saved = true; saveWeekly(); }
+    v.innerHTML = `<article class="card"><h2 style="margin:0;font-size:18px">${wk ? "今週のまとめは終わりです" : "今日の瞬間作文は終わりです"}</h2>
+      <p class="note" style="margin:0">${comp.done ? `${comp.done}問に答えました（◎ ${t.correct || 0}・○ ${t.ok || 0}・✕ ${t.wrong || 0}）。` : wk ? "出題できる問題がありません。単語帳やシャドーイングで覚えると出題できます。" : "今日出せる問題がありません。単語帳やシャドーイングで覚えた文から出題します。"}</p>
+      ${wk && t.wrong ? `<p class="note" style="margin:0">✕ だった問題は、明日の瞬間作文で出てきます。</p>` : ""}
+      <button class="btn" id="cp-menu">練習のメニューへ</button></article>`;
+    $("cp-menu").onclick = () => { comp = null; renderQuizMenu(); };
+    return;
+  }
+  const c = data.cards.compose[it.id], r = comp.result;
+  const MARK = { correct: ["ok", "◎ 正解"], ok: ["mid", "○ 通じる"], wrong: ["ng", "✕ もう一度"] };
+  let h = `<article class="card compose" aria-live="polite">
+    <div class="row between"><span class="chip">${comp.mode === "weekly" ? "📅 今週のまとめ" : "🗣️ 瞬間作文 · " + (c ? "復習" : "新規")} · ${esc(it.label)}</span><span class="note">残り ${comp.queue.length + 1}</span></div>
+    <p class="note" style="margin:0">英語で言うと？</p>
+    <p class="cue">${esc(it.ja)}</p>
+    ${it.target ? `<p class="note targets" style="margin:0">使う表現：<b>${esc(it.target)}</b></p>` : ""}`;
+  if (comp.state === "ask") {
+    h += `<button class="btn primary" id="cp-rec">${MIC}英語で言う</button>
+      <div class="row"><button class="btn" id="cp-type" style="width:auto;flex:1">⌨ 入力する</button><button class="btn" id="cp-skip" style="width:auto;flex:1">わからない</button></div>
+      <div class="row" style="gap:12px">${gainSelectHTML("gain-sel-comp")}</div>`;
+  } else if (comp.state === "listening") {
+    h += `<button class="btn primary rec" disabled>${MIC}聞き取り中…話し終わると自動で止まります</button>
+      <div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div><p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>`;
+  } else if (comp.state === "typing") {
+    h += `<textarea id="cp-input" class="textin" rows="3" placeholder="英語で入力" maxlength="400" autocapitalize="sentences">${esc(comp.answer)}</textarea>
+      <div class="row"><button class="btn primary" id="cp-check" style="width:auto;flex:1">判定する</button><button class="btn" id="cp-back">声で答える</button></div>`;
+  } else if (comp.state === "judging") {
+    h += `<p class="note" style="margin:0">あなた：${esc(comp.answer)}</p><p class="note">判定しています…</p>`;
+  } else if (comp.state === "self") {
+    h += `<p class="note" style="margin:0">あなた：${esc(comp.answer || "（答えなし）")}</p>
+      <div class="li"><button class="iconbtn" data-say="${esc(it.en)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="m">お手本</div><div class="s">${esc(it.en)}</div></div></div>
+      <p class="note" style="margin:0">AI で判定できなかったので、自分で判定してください。</p>
+      <div class="row"><button class="btn" data-cp-self="correct" style="width:auto;flex:1">◎ 言えた</button><button class="btn" data-cp-self="ok" style="width:auto;flex:1">○ 惜しい</button><button class="btn" data-cp-self="wrong" style="width:auto;flex:1">✕ 言えなかった</button></div>`;
+  } else if (r) {
+    const [cls, label] = MARK[r.grade];
+    h += `<div class="verdict ${cls}" role="status"><b>${label}</b>${r.note ? `<span>${esc(r.note)}</span>` : ""}</div>
+      ${comp.answer ? `<p class="note" style="margin:0">あなた：${esc(comp.answer)}</p>` : ""}
+      <div class="list">
+        <div class="li"><button class="iconbtn" data-say="${esc(it.en)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="m">お手本</div><div class="s">${esc(it.en)}</div></div></div>
+        ${r.better && normEn(r.better) !== normEn(it.en) && normEn(r.better) !== normEn(comp.answer) ? `<div class="li"><button class="iconbtn" data-say="${esc(r.better)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="m">あなたの答えを自然にすると</div><div class="s">${esc(r.better)}</div></div></div>` : ""}
+      </div>
+      <button class="btn primary" id="cp-next">次へ</button>`;
+  }
+  h += `</article>`;
+  v.innerHTML = h;
+  if ($("cp-rec")) $("cp-rec").onclick = composeListen;
+  if ($("cp-type")) $("cp-type").onclick = () => { comp.state = "typing"; renderCompose(); $("cp-input").focus(); };
+  if ($("cp-back")) $("cp-back").onclick = () => { comp.state = "ask"; renderCompose(); };
+  if ($("cp-skip")) $("cp-skip").onclick = () => { comp.answer = ""; comp.result = { grade: "wrong", better: "", note: "" }; comp.state = "result"; renderCompose(); say(it.en, 0.9); };
+  if ($("cp-check")) $("cp-check").onclick = () => { const t = $("cp-input").value.trim(); if (t) composeJudge(t); };
+  if ($("cp-next")) $("cp-next").onclick = composeNext;
+  bindGainSelect("gain-sel-comp", renderCompose);
+  v.querySelectorAll("[data-cp-self]").forEach((b) => (b.onclick = () => { comp.result = { grade: b.dataset.cpSelf, better: "", note: "" }; comp.state = "result"; renderCompose(); }));
+}
+async function composeListen() {
+  if (!comp || micBusy()) return;
+  if (!window.SpeechSDK) { showBanner("音声認識の部品を読み込めていません。ページを開き直してください。"); return; }
+  stopAudio(); unlockAudio();
+  if (!audioCtx) { showBanner("このブラウザでは録音できません。入力で答えてください。"); return; }
+  comp.state = "listening"; renderCompose(); showBanner("");
+  const text = await listenText();
+  if (!comp) return;
+  if (!text) { comp.state = "ask"; renderCompose(); return; }
+  composeJudge(text);
+}
+async function composeJudge(answer) {
+  const it = comp.cur;
+  comp.answer = answer; comp.state = "judging"; renderCompose();
+  try {
+    const r = await api("compose-judge", { method: "POST", body: JSON.stringify({ ja: it.ja, model: it.en, answer, target: it.target }) });
+    if (!comp || comp.cur !== it) return;
+    comp.result = r; comp.state = "result";
+    renderCompose();
+    say(it.en, 0.9); // 答え合わせとしてお手本を聞く
+  } catch (e) {
+    if (!comp) return;
+    if (e.status === 429) showBanner("今日の AI 判定の上限に達しました。自分で判定してください。");
+    comp.state = "self"; renderCompose();
+  }
+}
+function composeNext() {
+  const it = comp.cur, r = comp.result;
+  if (it && r) {
+    const prev = data.cards.compose[it.id];
+    const g = COMPOSE_GRADE[r.grade] || "again";
+    // 今週のまとめでは、復習の時期が来ていない問題の予定を進めない（「もう一度」なら明日に前倒し）。新規の数にも数えない
+    const weekly = comp.mode === "weekly", extra = weekly && prev && prev.due > Date.now();
+    if (!extra) noteRetention("compose", prev, g);
+    data.cards.compose[it.id] = extra ? (g === "again" ? S.applyTalkUse(prev, false) : { ...prev }) : S.nextState(prev, g);
+    saveCard("compose", it.id);
+    if (!prev && !weekly) { bumpLog("composeLog"); saveSettings(); }
+    comp.tally[r.grade] = (comp.tally[r.grade] || 0) + 1;
+    // その場での出し直しは1回だけ（2回目は明日）
+    if (g === "again" && !weekly && !comp.retried.has(it.id)) { comp.retried.add(it.id); comp.queue.splice(Math.min(3, comp.queue.length), 0, it); }
+    comp.done++;
+  }
+  comp.cur = comp.queue.shift() || null; comp.state = "ask"; comp.answer = ""; comp.result = null;
+  renderCompose();
+}
+
+/* ================= ディクテーション（Phase 3b） =================
+   練習したシャドーイングの文（フレーズ帳を含む）を聞いて書き取る。単語ごとに比べて、抜けた語・違う語に色を付ける。
+   AI は使わない（読み上げは端末に保存した音声）。独自の間隔反復で、新規は1日3問 */
+let dict = null; // { queue, cur, state: ask|result, answer, diff, done, retried:Set }
+function dictItems() {
+  return data.sentences.filter((x) => data.cards.sentence[x.id] && x.text)
+    .map((x) => ({ id: x.id, en: x.text, ja: x.ja || "", scene: x.scene || "", cat: x.category === "conference" ? "conference" : "conversation", order: x.order || 0 }));
+}
+const dictQueue = () => S.buildQueue(dictItems(), data.cards.dict, st().dictLog, st().dictPerDay, "cat", "conference", "conversation");
+function startDict() {
+  const q = dictQueue();
+  dict = { queue: q.slice(1), cur: q[0] || null, state: "ask", answer: "", diff: null, done: 0, retried: new Set() };
+  showBanner(""); renderDict();
+  if (dict.cur) say(dict.cur.en, 0.9);
+}
+function renderDict() {
+  const v = $("view-quiz");
+  if (!dict) return renderQuizMenu();
+  const it = dict.cur;
+  if (!it) {
+    v.innerHTML = `<article class="card"><h2 style="margin:0;font-size:18px">今日のディクテーションは終わりです</h2>
+      <p class="note" style="margin:0">${dict.done ? dict.done + "問に答えました。" : "今日出せる問題がありません。シャドーイングで練習した文から出題します。"}</p>
+      <button class="btn" id="dc-menu">練習のメニューへ</button></article>`;
+    $("dc-menu").onclick = () => { dict = null; renderQuizMenu(); };
+    return;
+  }
+  const c = data.cards.dict[it.id], d = dict.diff;
+  const words = S.dictTokens(it.en).length;
+  let h = `<article class="card dict" aria-live="polite">
+    <div class="row between"><span class="chip">🎧 ディクテーション · ${c ? "復習" : "新規"} · ${esc(it.scene)}</span><span class="note">残り ${dict.queue.length + 1}</span></div>
+    <p class="note" style="margin:0">聞こえた英文を書き取ってください（${words}語）。</p>
+    <div class="row"><button class="btn" data-say="${esc(it.en)}" id="dc-play">${SPK}もう一度聞く</button><button class="btn" data-say="${esc(it.en)}" data-rate="0.7">${SLOW}ゆっくり</button><button class="btn" data-say="${esc(it.en)}" data-rate="0.5">${SLOW}さらにゆっくり</button></div>`;
+  if (dict.state === "ask") {
+    h += `<textarea id="dc-input" class="textin" rows="3" placeholder="英語で入力" maxlength="400" autocapitalize="sentences" autocomplete="off" autocorrect="off" spellcheck="false">${esc(dict.answer)}</textarea>
+      <div class="row"><button class="btn primary" id="dc-check" style="width:auto;flex:1">答え合わせ</button><button class="btn" id="dc-skip">わからない</button></div>`;
+  } else {
+    const grade = S.dictationGrade(d.score);
+    const [cls, label] = grade === "good" ? ["ok", "◎ 全部書けた"] : grade === "hard" ? ["mid", "○ あと少し"] : ["ng", "✕ もう一度"];
+    h += `<div class="verdict ${cls}" role="status"><b>${label}（${d.score}点）</b><span>${d.okCount} / ${d.total} 語${d.extra.length ? `、余分な語 ${d.extra.length}` : ""}</span></div>
+      <div><p class="note" style="margin:0 0 4px">お手本（赤は書けなかった語）</p><p class="sent dictans">${d.model.map((x) => `<span class="${x.ok ? "dk" : "dm"}">${esc(x.w)}</span>`).join(" ")}</p>
+      <p class="note" style="margin:4px 0 0">${esc(it.en)}${it.ja ? "　" + esc(it.ja) : ""}</p></div>
+      ${dict.answer ? `<p class="note" style="margin:0">あなた：${esc(dict.answer)}${d.extra.length ? `<br>余分な語：${d.extra.map(esc).join(", ")}` : ""}</p>` : ""}
+      <button class="btn primary" id="dc-next">次へ</button>`;
+  }
+  h += `</article>`;
+  v.innerHTML = h;
+  if ($("dc-check")) $("dc-check").onclick = () => { const t = $("dc-input").value.trim(); if (t) dictCheck(t); };
+  if ($("dc-input")) $("dc-input").oninput = (e) => { dict.answer = e.target.value; };
+  if ($("dc-skip")) $("dc-skip").onclick = () => dictCheck("");
+  if ($("dc-next")) $("dc-next").onclick = dictNext;
+}
+function dictCheck(answer) {
+  dict.answer = answer; dict.diff = S.dictationDiff(answer, dict.cur.en); dict.state = "result";
+  renderDict();
+}
+function dictNext() {
+  const it = dict.cur;
+  const prev = data.cards.dict[it.id];
+  const g = S.dictationGrade(dict.diff.score);
+  noteRetention("dict", prev, g);
+  data.cards.dict[it.id] = S.nextState(prev, g);
+  saveCard("dict", it.id);
+  if (!prev) { bumpLog("dictLog"); saveSettings(); }
+  if (g === "again" && !dict.retried.has(it.id)) { dict.retried.add(it.id); dict.queue.splice(Math.min(3, dict.queue.length), 0, it); }
+  dict.done++;
+  dict.cur = dict.queue.shift() || null; dict.state = "ask"; dict.answer = ""; dict.diff = null;
+  renderDict();
+  if (dict.cur) say(dict.cur.en, 0.9); // 次の問題をすぐ聞く（タップの中なので iPhone でも鳴る）
+}
+
+/* ================= 苦手な音（Phase 3c） =================
+   直近2か月のシャドーイングの発音記録から、音ごとの平均点を出し、低い音の上位3つを示す。
+   コツ・つまずいた単語（ゆっくり聞く）・その音を含む文を今日のシャドーイングの先頭に足す練習 */
+let sounds = null; // { loading, list, total, error }
+const ymKey = (d) => `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}`; // サーバーの記録は UTC の月で区切る
+async function startSounds() {
+  sounds = { loading: true }; renderSounds();
+  try {
+    const now = new Date(), prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const [a, b] = await Promise.all([api("attempts?month=" + ymKey(now)), api("attempts?month=" + ymKey(prev))]);
+    const rows = [...(a || []), ...(b || [])];
+    sounds = { list: S.weakSounds(rows, { minCount: 5, top: 3 }), total: rows.length };
+  } catch (e) { sounds = { error: true, list: [], total: 0 }; }
+  renderSounds();
+}
+function renderSounds() {
+  const v = $("view-quiz");
+  if (!sounds) return renderQuizMenu();
+  const back = `<button class="btn" id="sd-menu">練習のメニューへ</button>`;
+  if (sounds.loading) { v.innerHTML = emptyCard("発音の記録を集計しています", ""); return; }
+  const known = new Set(data.sentences.map((x) => x.id));
+  let h = `<div style="display:flex;flex-direction:column;gap:12px">
+    <article class="card" style="gap:6px"><h2 style="margin:0;font-size:18px">🔤 苦手な音</h2>
+      <p class="note" style="margin:0">直近2か月のシャドーイングの記録（${sounds.total}回の録音）から、平均点の低い音を出しています。5回以上出てきた音だけが対象です。</p></article>`;
+  if (sounds.error) h += emptyCard("記録を読み込めませんでした", "時間をおいてもう一度開いてください。");
+  else if (!sounds.list.length) h += emptyCard("まだ記録が足りません", "シャドーイングで録音を続けると、音ごとの点数が集まります。");
+  sounds.list.forEach((x, i) => {
+    const sents = x.sentenceIds.filter((id) => known.has(id));
+    h += `<article class="card sound">
+      <div class="row between"><span class="ipa big">/${esc(x.ph)}/</span><span class="chip ${x.avg < 60 ? "ng" : x.avg < 80 ? "mid" : ""}">平均 ${x.avg}点・${x.n}回</span></div>
+      <p style="margin:0">${esc(x.tip)}</p>
+      ${guideHTML(x.guide)}
+      <div><p class="note" style="margin:0 0 4px">つまずいた単語（押すとゆっくり読み上げ）</p>
+        <div class="row">${x.words.map((w) => `<button class="btn sm" data-say="${esc(w.w)}" data-rate="0.55">${SLOW}${esc(w.w)} <span class="note">${w.avg}点</span></button>`).join("")}</div></div>
+      ${sents.length ? `<button class="btn primary" data-sound-practice="${i}">この音を含む文をシャドーイングで練習（${Math.min(5, sents.length)}文）</button>` : ""}
+    </article>`;
+  });
+  h += back + `</div>`;
+  v.innerHTML = h;
+  $("sd-menu").onclick = () => { sounds = null; renderQuizMenu(); };
+  v.querySelectorAll("[data-sound-practice]").forEach((b) => (b.onclick = () => practiceSound(sounds.list[+b.dataset.soundPractice])));
+}
+/* その音を含む文（最大5文）を、今日のシャドーイングの先頭に入れて、シャドーイングを開く */
+function practiceSound(x) {
+  const pick = x.sentenceIds.map((id) => data.sentences.find((y) => y.id === id)).filter(Boolean).slice(0, 5);
+  if (!pick.length) return;
+  const ids = new Set(pick.map((y) => y.id));
+  pick.forEach((y) => sExtra.add(y.id));
+  const rest = sQueue.filter((y) => !ids.has(y.id));
+  if (sCur && !ids.has(sCur.id) && !sResult) rest.unshift(sCur); // 練習中でなければ、今の文は後ろに回す
+  sQueue = [...pick, ...rest];
+  if (!sCur || !sResult) { sCur = sQueue.shift(); sBest = null; sBestNg = 0; openWord = -1; }
+  showBanner(`苦手な音 /${x.ph}/ を含む文を ${pick.length} 文、今日のシャドーイングの先頭に入れました。`);
+  tab("shadow");
 }
 
 /* ================= クイズ ================= */
@@ -549,15 +1492,35 @@ const stressIdx = (w) => sylls(w).findIndex((p) => /[A-Z]/.test(p) && p === p.to
 function renderQuizMenu() {
   quiz = null;
   const v = $("view-quiz");
-  if (!data.words.length) { v.innerHTML = emptyCard("まだ単語がありません", ""); return; }
+  if (!loaded) { v.innerHTML = emptyCard("読み込んでいます", ""); return; }
   const studied = data.words.filter((w) => data.cards.word[w.id]).length;
   const q = st().quiz || { total: 0, correct: 0 };
+  const cq = composeQueue(), dq = dictQueue();
+  const wres = (st().weekly || {})[S.weekStart()], wn = Math.min(10, composeItems().length);
+  const ret = S.retentionSummary(st().retention || {}, 4);
+  const KIND = { word: "単語", sentence: "シャドーイング", compose: "瞬間作文", dict: "ディクテーション" };
   v.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
-    <p class="prompt">${studied >= 4 ? `学習済みの${studied}語から出題します。` : "登録済みの全単語から出題します。"}1回10問です。</p>
+    <article class="card retention" style="gap:6px">
+      <div class="row between"><b>📈 定着率（直近4週）</b><span class="big">${ret.total.rate == null ? "—" : ret.total.rate + "%"}</span></div>
+      <p class="note" style="margin:0">7日以上あけた復習で、覚えていた割合です。${ret.total.n ? `（${ret.total.n}回）` : "復習の間隔が7日を超えると集まり始めます。"}</p>
+      ${ret.total.n ? `<div class="row" style="flex-wrap:wrap;gap:6px">${Object.entries(KIND).filter(([k]) => ret.kinds[k]).map(([k, l]) => `<span class="chip">${l} ${ret.kinds[k].rate}%（${ret.kinds[k].n}）</span>`).join("")}</div>` : ""}
+    </article>
+    <button class="scene-btn" data-practice="weekly"${wn ? "" : " disabled"}><span class="scene-emoji" aria-hidden="true">📅</span>
+      <span class="grow"><b>今週のまとめ</b><span class="note" style="display:block">${wres ? `今週は済み（◎ ${wres.correct}・○ ${wres.ok}・✕ ${wres.wrong}）。もう一度もできます` : wn ? `今週覚えた単語・フレーズ・文から${wn}問（日本語 → 英語）。週に1回どうぞ` : "単語帳やシャドーイングで覚えると出題できます"}</span></span></button>
+    <h3 class="scene-group">思い出して使う</h3>
+    <button class="scene-btn" data-practice="compose"><span class="scene-emoji" aria-hidden="true">🗣️</span>
+      <span class="grow"><b>瞬間作文</b><span class="note" style="display:block">日本語を見て、英語で言う。今日 ${cq.length} 問（新規は1日${st().composePerDay}問まで）</span></span></button>
+    <button class="scene-btn" data-practice="dict"><span class="scene-emoji" aria-hidden="true">🎧</span>
+      <span class="grow"><b>ディクテーション</b><span class="note" style="display:block">聞いて、英文を書き取る。今日 ${dq.length} 問（新規は1日${st().dictPerDay}問まで）</span></span></button>
+    <h3 class="scene-group">発音</h3>
+    <button class="scene-btn" data-practice="sounds"><span class="scene-emoji" aria-hidden="true">🔤</span>
+      <span class="grow"><b>苦手な音</b><span class="note" style="display:block">シャドーイングの記録から、点数の低い音とコツ、その音を含む文の練習</span></span></button>
+    <h3 class="scene-group">単語クイズ</h3>
+    ${data.words.length ? `<p class="prompt">${studied >= 4 ? `学習済みの${studied}語から出題します。` : "登録済みの全単語から出題します。"}1回10問です。</p>
     <div class="modes">
       <button class="mode all" data-mode="mix"><span class="t">おまかせ</span><span class="d">4種類をまぜて出題</span></button>
       ${Object.entries(MODES).map(([k, m]) => `<button class="mode" data-mode="${k}"><span class="t">${m.t}</span><span class="d">${m.d}</span></button>`).join("")}
-    </div>
+    </div>` : `<p class="note" style="margin:0">まだ単語がありません。「一覧」タブから初期データを取り込んでください。</p>`}
     ${q.total ? `<p class="note">これまでの正答率 ${Math.round((q.correct / q.total) * 100)}%（${q.total}問）</p>` : ""}
   </div>`;
 }
@@ -885,24 +1848,33 @@ function maybeAskShareAgain() {
 }
 
 /* ---------- タブとクリック ---------- */
-const TABS = ["study", "shadow", "quiz", "list"];
+const TABS = ["study", "shadow", "talk", "quiz", "list"];
 function tab(which) {
   for (const t of TABS) { $("tab-" + t).setAttribute("aria-selected", which === t); $("view-" + t).hidden = which !== t; }
   if (which === "list") renderList();
-  if (which === "quiz" && !quiz) renderQuizMenu();
+  if (which === "quiz" && sounds) renderSounds();
+  else if (which === "quiz" && dict) renderDict();
+  else if (which === "quiz" && comp) renderCompose();
+  else if (which === "quiz" && !quiz) renderQuizMenu();
   if (which === "shadow") renderShadow();
+  if (which === "talk") renderTalk();
 }
 TABS.forEach((t) => ($("tab-" + t).onclick = () => tab(t)));
 
 document.addEventListener("click", (e) => {
   unlockAudio();
   const s = e.target.closest("[data-say]"); if (s) { say(s.dataset.say, s.dataset.rate ? +s.dataset.rate : 0.9); return; }
+  const scb = e.target.closest("[data-scene]"); if (scb) { startTalk(scb.dataset.scene); return; }
+  const sp = e.target.closest("[data-phrase]"); if (sp) { savePhrase(sp); return; }
+  const dp = e.target.closest("[data-del-phrase]"); if (dp) { deletePhrase(dp.dataset.delPhrase); return; }
   const g = e.target.closest("[data-grade]"); if (g) { gradeWord(g.dataset.grade); return; }
-  const pw = e.target.closest("[data-pw]"); if (pw) { openWord = +pw.dataset.pw; renderShadow(); return; }
+  const dr = e.target.closest("[data-drill]"); if (dr) { startDrill(dr.dataset.drill); return; }
+  const pw = e.target.closest("[data-pw]"); if (pw) { openWord = +pw.dataset.pw; drill = null; renderShadow(); return; }
   const lm = e.target.closest("[data-lm]"); if (lm) { listMode = lm.dataset.lm; renderList(); return; }
   const lc = e.target.closest("[data-lc]"); if (lc) { listCat = lc.dataset.lc; renderList(); return; }
   const fb = e.target.closest("[data-fb]"); if (fb) { openFeedbackFor(fb.dataset.fb); return; }
   const m = e.target.closest("[data-mode]"); if (m) { startQuiz(m.dataset.mode); return; }
+  const pr = e.target.closest("[data-practice]"); if (pr) { if (pr.dataset.practice === "compose") startCompose(); if (pr.dataset.practice === "dict") startDict(); if (pr.dataset.practice === "sounds") startSounds(); if (pr.dataset.practice === "weekly") startCompose(weeklyItems(), "weekly"); return; }
   if (!quiz) return;
   if (quiz.state === "self") { const sf = e.target.closest("[data-self]"); if (sf) finishAnswer(sf.dataset.self === "1", ""); return; }
   if (quiz.state !== "ask") return;
@@ -921,6 +1893,10 @@ document.addEventListener("click", (e) => {
 async function load() {
   const d = await api("state");
   data = d;
+  // フレーズ帳の表現は、シャドーイングの会話文として出題する（新しい文より先に出るよう order を小さく）
+  data.phrases = d.phrases || [];
+  data.cards.compose = data.cards.compose || {}; data.cards.dict = data.cards.dict || {};
+  data.sentences = [...(d.sentences || []), ...data.phrases.map(phraseToSentence)];
   data.settings = { ...defaults, ...(d.settings || {}) };
   if (!st().instanceId) { // 将来、匿名でフィードバックを集めるときに使うランダムなID（個人情報とは結び付かない）
     st().instanceId = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now());
@@ -954,13 +1930,19 @@ async function checkUpdate() {
     bar.hidden = false;
   } catch (e) {}
 }
-$("update-btn").onclick = () => { if (!recording) location.reload(); };
+$("update-btn").onclick = () => { if (!micBusy()) location.reload(); };
 checkUpdate();
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
+  if (document.visibilityState !== "visible") {
+    // 録音中にほかのアプリへ切り替えたら、録音を打ち切って結果を受け取る（戻ったときに固まらないように）
+    if (abortRec) abortRec();
+    return;
+  }
+  // 戻ったときは、止まっている可能性のある AudioContext を捨てる（次のタップで作り直す）
+  if (audioCtx && !micBusy()) resetOutput();
   checkUpdate();
-  if (loaded && !recording && !quiz && !revealed && !sResult) load().catch(() => {});
+  if (loaded && !micBusy() && !quiz && !revealed && !sResult && !talk) load().catch(() => {});
 });
 // 戻る・タブ復元でメモリ上の画面が出たとき（bfcache）も確かめる
 window.addEventListener("pageshow", (e) => { if (e.persisted) { verCheckedAt = 0; checkUpdate(); } });
