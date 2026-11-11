@@ -8,6 +8,8 @@
     "SPEECH_REGION": "japaneast",
     "FOUNDRY_ENDPOINT": "https://<リソース名>.openai.azure.com",
     "FOUNDRY_API_KEY": "<Foundry リソースのキー>",
-    "FOUNDRY_DEPLOYMENT": "gpt-5.4-mini"
+    "FOUNDRY_DEPLOYMENT": "gpt-5.4-mini",
+    "ROLEPLAY_DAILY_LIMIT": "60",
+    "COMPOSE_DAILY_LIMIT": "100"
   }
 }

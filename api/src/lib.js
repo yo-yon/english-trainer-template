@@ -74,6 +74,12 @@ async function upsert(pk, rk, obj) {
   await t.upsertEntity({ partitionKey: pk, rowKey: rk, data: JSON.stringify(rest) }, "Replace");
 }
 
+/** 1件削除（なければ何もしない） */
+async function remove(pk, rk) {
+  const t = await table();
+  try { await t.deleteEntity(pk, rk); } catch (e) { if (e.statusCode !== 404) throw e; }
+}
+
 /** 同じパーティションへの一括書き込み（トランザクションは1回100件まで） */
 async function upsertMany(pk, items) {
   const t = await table();
@@ -97,4 +103,4 @@ const fail = (context, e) => {
   return { status: 500, jsonBody: { error: "server_error" } };
 };
 
-module.exports = { getPrincipal, requireOwner, listPartition, getOne, upsert, upsertMany, safeKey, bad, fail, OWNER_ROLE };
+module.exports = { getPrincipal, requireOwner, listPartition, getOne, upsert, upsertMany, remove, safeKey, bad, fail, OWNER_ROLE };

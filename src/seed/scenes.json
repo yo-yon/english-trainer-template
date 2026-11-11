@@ -1,0 +1,542 @@
+[
+ {
+  "id": "qa-speaker",
+  "group": "カンファレンス",
+  "title": "登壇者に質問する",
+  "emoji": "🎤",
+  "role": "the speaker of a breakout session on AI agents and low-code development, friendly and chatting with attendees after the session",
+  "setting": "At an international tech conference, right after the session ends, near the stage.",
+  "goal": "Ask the speaker one specific question about something from the session, and confirm that you understood the answer.",
+  "goal_ja": "セッションの内容について1つ質問し、答えを理解したことを確かめる",
+  "opener": "Thanks for coming to the session! Did you have a question?",
+  "opener_ja": "セッションに来てくれてありがとうございます！何か質問がありましたか？",
+  "phrases": [
+   {
+    "en": "I really enjoyed your session.",
+    "ja": "セッション、とてもよかったです。"
+   },
+   {
+    "en": "I have a quick question about the demo.",
+    "ja": "デモについて少し質問があります。"
+   },
+   {
+    "en": "Could you explain that part again?",
+    "ja": "その部分をもう一度説明していただけますか？"
+   },
+   {
+    "en": "So, if I understand correctly, ...",
+    "ja": "つまり、私の理解が正しければ…"
+   }
+  ],
+  "twists": [
+   "The speaker answers with a question back: how does your team handle this today?",
+   "The speaker uses a technical term you may not know and continues talking quickly.",
+   "Another attendee is waiting, so the speaker asks you to keep it short."
+  ],
+  "targets": []
+ },
+ {
+  "id": "booth",
+  "group": "カンファレンス",
+  "title": "ブースで質問する",
+  "emoji": "🧑‍💻",
+  "role": "a product team member staffing a software company's booth in the expo hall",
+  "setting": "At an international tech conference, at a booth in the expo hall.",
+  "goal": "Find out what the product does, how it is priced, and what you should check before introducing it at your company.",
+  "goal_ja": "製品で何ができるか、料金の仕組み、自社に入れる前に確認すべきことを聞き出す",
+  "opener": "Hi there! Welcome to our booth. What brings you by?",
+  "opener_ja": "こんにちは！ブースへようこそ。今日はどんなご用でお立ち寄りですか？",
+  "phrases": [
+   {
+    "en": "I'm curious about how the pricing works.",
+    "ja": "料金の仕組みが気になっています。"
+   },
+   {
+    "en": "What should we check before we roll it out?",
+    "ja": "導入する前に何を確認すべきですか？"
+   },
+   {
+    "en": "Is there any documentation I can read later?",
+    "ja": "あとで読めるドキュメントはありますか？"
+   },
+   {
+    "en": "That's really helpful, thank you.",
+    "ja": "とても参考になりました。ありがとうございます。"
+   }
+  ],
+  "twists": [
+   "The product is not available in Japan yet, and the partner explains the alternatives.",
+   "The partner offers a quick live demo and asks what you want to see.",
+   "The partner asks for your email to send you a follow-up."
+  ],
+  "targets": []
+ },
+ {
+  "id": "networking",
+  "group": "カンファレンス",
+  "title": "ネットワーキング",
+  "emoji": "🤝",
+  "role": "Mike, an outgoing IT consultant from Chicago, at the conference's evening networking reception",
+  "setting": "At the networking reception with drinks and snacks.",
+  "goal": "Introduce yourself, explain what you do in one or two sentences, ask about Mike's work, and offer to connect on LinkedIn.",
+  "goal_ja": "自己紹介をして仕事を1〜2文で説明し、相手の仕事も聞いて、LinkedIn でつながる",
+  "opener": "Hi, I'm Mike. Is this your first time at this conference?",
+  "opener_ja": "やあ、マイクです。このカンファレンスは初めてですか？",
+  "phrases": [
+   {
+    "en": "Nice to meet you. I'm from Japan.",
+    "ja": "はじめまして。日本から来ました。"
+   },
+   {
+    "en": "I work as an IT engineer.",
+    "ja": "IT エンジニアをしています。"
+   },
+   {
+    "en": "What kind of projects are you working on?",
+    "ja": "どんなプロジェクトをされているんですか？"
+   },
+   {
+    "en": "Let's connect on LinkedIn.",
+    "ja": "LinkedIn でつながりましょう。"
+   }
+  ],
+  "twists": [
+   "Mike has worked with a Japanese company before and asks about your experience.",
+   "Mike suggests getting dinner with a few other attendees.",
+   "Mike mishears your company name and you need to correct him politely."
+  ],
+  "targets": []
+ },
+ {
+  "id": "seat-chat",
+  "group": "カンファレンス",
+  "title": "隣の席の人と雑談",
+  "emoji": "💺",
+  "role": "Sarah, an attendee from a hospital IT team in Texas, sitting next to the learner before the keynote starts",
+  "setting": "In the keynote hall of an international tech conference, about ten minutes before the keynote begins.",
+  "goal": "Make small talk: ask where Sarah is from and which session she liked, and share one session you liked.",
+  "goal_ja": "相手の出身と気に入ったセッションを聞き、自分のおすすめのセッションも話す",
+  "opener": "Hi! Is anyone sitting here? Oh, great. Are you excited for the keynote?",
+  "opener_ja": "こんにちは！ここ、誰か座っていますか？あ、よかった。基調講演、楽しみですね？",
+  "phrases": [
+   {
+    "en": "Where are you from?",
+    "ja": "どちらから来られたんですか？"
+   },
+   {
+    "en": "Which session did you enjoy the most so far?",
+    "ja": "今のところ、どのセッションが一番よかったですか？"
+   },
+   {
+    "en": "I really liked the session on AI agents yesterday.",
+    "ja": "昨日の AI エージェントのセッションがとてもよかったです。"
+   },
+   {
+    "en": "Enjoy the rest of the conference!",
+    "ja": "残りのカンファレンスも楽しんでください！"
+   }
+  ],
+  "twists": [
+   "Sarah asks for your opinion on a recent AI announcement.",
+   "The keynote is delayed, so you have more time to talk.",
+   "Sarah asks for a recommendation for a session this afternoon."
+  ],
+  "targets": []
+ },
+ {
+  "id": "info-desk",
+  "group": "カンファレンス",
+  "title": "受付・案内所で聞く",
+  "emoji": "🗺️",
+  "role": "a conference staff member at the registration and information desk",
+  "setting": "At the registration and information desk of a large conference center.",
+  "goal": "Pick up your badge, then find out where the room for your next session is and when it starts, and repeat the directions back to confirm.",
+  "goal_ja": "バッジを受け取り、次のセッションの部屋と開始時刻を聞いて、道順を言い直して確かめる",
+  "opener": "Hi, welcome! How can I help you?",
+  "opener_ja": "こんにちは、ようこそ！どうなさいましたか？",
+  "phrases": [
+   {
+    "en": "I'd like to pick up my badge.",
+    "ja": "バッジを受け取りたいのですが。"
+   },
+   {
+    "en": "Excuse me, where is room 116?",
+    "ja": "すみません、116号室はどこですか？"
+   },
+   {
+    "en": "What time does the next session start?",
+    "ja": "次のセッションは何時に始まりますか？"
+   },
+   {
+    "en": "So I go down this hallway and turn left?",
+    "ja": "この廊下をまっすぐ行って左ですね？"
+   }
+  ],
+  "twists": [
+   "Your name is not on the list at first, and the staff member asks for your confirmation email.",
+   "The session room has changed and the staff member gives new directions.",
+   "The staff member says the session is full and suggests a waiting line."
+  ],
+  "targets": []
+ },
+ {
+  "id": "immigration",
+  "group": "旅行・日常",
+  "title": "入国審査",
+  "emoji": "🛂",
+  "role": "an immigration officer at an international airport, polite but brief",
+  "setting": "At the immigration counter after landing in another country.",
+  "goal": "Answer the officer's questions clearly: the purpose of your visit, how long you will stay, where you will stay, and what you do for work.",
+  "goal_ja": "訪問の目的・滞在期間・滞在先・仕事を、はっきり答える",
+  "opener": "Good afternoon. Passport, please. What's the purpose of your visit?",
+  "opener_ja": "こんにちは。パスポートをお願いします。訪問の目的は何ですか？",
+  "phrases": [
+   {
+    "en": "I'm here for a business conference.",
+    "ja": "仕事のカンファレンスで来ました。"
+   },
+   {
+    "en": "I'll be staying for five days.",
+    "ja": "5日間滞在します。"
+   },
+   {
+    "en": "I'm staying at a hotel downtown.",
+    "ja": "ダウンタウンのホテルに泊まります。"
+   },
+   {
+    "en": "I'm a software engineer.",
+    "ja": "ソフトウェアエンジニアです。"
+   }
+  ],
+  "twists": [
+   "The officer asks a follow-up question: who is paying for your trip?",
+   "The officer asks if you have been to this country before.",
+   "The officer asks to see your return ticket."
+  ],
+  "targets": []
+ },
+ {
+  "id": "airport",
+  "group": "旅行・日常",
+  "title": "空港でチェックイン",
+  "emoji": "🧳",
+  "role": "an airline check-in agent at the airport counter",
+  "setting": "At the airline check-in counter, about two hours before an international flight.",
+  "goal": "Check in for your flight, check one bag, and ask for an aisle seat and which gate to go to.",
+  "goal_ja": "チェックインして荷物を1つ預け、通路側の席と搭乗口を確認する",
+  "opener": "Hi, where are you flying to today?",
+  "opener_ja": "こんにちは。今日はどちらまで行かれますか？",
+  "phrases": [
+   {
+    "en": "I'd like to check one bag.",
+    "ja": "荷物を1つ預けたいです。"
+   },
+   {
+    "en": "Could I have an aisle seat, please?",
+    "ja": "通路側の席にしていただけますか？"
+   },
+   {
+    "en": "Which gate does it leave from?",
+    "ja": "どの搭乗口から出発しますか？"
+   },
+   {
+    "en": "Is the flight on time?",
+    "ja": "便は定刻どおりですか？"
+   }
+  ],
+  "twists": [
+   "Your bag is slightly over the weight limit.",
+   "There are no aisle seats left, so the agent offers other options.",
+   "The flight is delayed by one hour."
+  ],
+  "targets": []
+ },
+ {
+  "id": "taxi",
+  "group": "旅行・日常",
+  "title": "タクシー・ライドシェア",
+  "emoji": "🚕",
+  "role": "a talkative taxi driver",
+  "setting": "In a taxi from the airport to a hotel in the city.",
+  "goal": "Tell the driver where you are going, ask how long it will take, make a little small talk, and pay at the end.",
+  "goal_ja": "行き先を伝えて所要時間を聞き、少し雑談して、最後に支払う",
+  "opener": "Hi there! Where to?",
+  "opener_ja": "どうも！どちらまで？",
+  "phrases": [
+   {
+    "en": "Could you take me to this hotel, please?",
+    "ja": "このホテルまでお願いします。"
+   },
+   {
+    "en": "How long will it take?",
+    "ja": "どのくらいかかりますか？"
+   },
+   {
+    "en": "Can you drop me off at the entrance?",
+    "ja": "入口で降ろしてもらえますか？"
+   },
+   {
+    "en": "Can I pay by card?",
+    "ja": "カードで払えますか？"
+   }
+  ],
+  "twists": [
+   "There is heavy traffic and the driver suggests a different route.",
+   "The driver asks if this is your first time in the city and recommends places to visit.",
+   "The card reader in the taxi is not working at first."
+  ],
+  "targets": []
+ },
+ {
+  "id": "hotel",
+  "group": "旅行・日常",
+  "title": "ホテルのチェックイン",
+  "emoji": "🏨",
+  "role": "a front desk agent at a large city hotel",
+  "setting": "At the hotel front desk in the evening.",
+  "goal": "Check in with your reservation, and ask about the checkout time and how to connect to the Wi-Fi.",
+  "goal_ja": "予約名を伝えてチェックインし、チェックアウトの時刻と Wi-Fi のつなぎ方を聞く",
+  "opener": "Good evening! Are you checking in?",
+  "opener_ja": "こんばんは！チェックインですか？",
+  "phrases": [
+   {
+    "en": "Yes, I have a reservation under Suzuki.",
+    "ja": "はい、鈴木の名前で予約しています。"
+   },
+   {
+    "en": "What time is checkout?",
+    "ja": "チェックアウトは何時ですか？"
+   },
+   {
+    "en": "How do I connect to the Wi-Fi?",
+    "ja": "Wi-Fi はどうやってつなぎますか？"
+   },
+   {
+    "en": "Could I get a late checkout?",
+    "ja": "レイトチェックアウトはできますか？"
+   }
+  ],
+  "twists": [
+   "Your room is not ready yet and the agent asks you to wait or come back later.",
+   "The agent offers a room upgrade for an extra fee.",
+   "The agent asks for a credit card for incidentals."
+  ],
+  "targets": []
+ },
+ {
+  "id": "coffee",
+  "group": "旅行・日常",
+  "title": "カフェで注文する",
+  "emoji": "☕",
+  "role": "a friendly barista at a busy coffee shop",
+  "setting": "At the counter of a coffee shop in the morning.",
+  "goal": "Order a drink with one change (size, milk, or ice), answer the barista's questions, and pay.",
+  "goal_ja": "サイズやミルクなどを1つ指定して飲み物を注文し、質問に答えて支払う",
+  "opener": "Hi! What can I get started for you?",
+  "opener_ja": "こんにちは！ご注文は何にしますか？",
+  "phrases": [
+   {
+    "en": "Can I get a medium latte, please?",
+    "ja": "ラテのMサイズをください。"
+   },
+   {
+    "en": "Could I have it with oat milk?",
+    "ja": "オーツミルクにできますか？"
+   },
+   {
+    "en": "It's for here.",
+    "ja": "店内で飲みます。"
+   },
+   {
+    "en": "That's all, thanks.",
+    "ja": "以上です。ありがとう。"
+   }
+  ],
+  "twists": [
+   "The oat milk is sold out today.",
+   "The barista mishears your name.",
+   "The barista recommends the seasonal special drink."
+  ],
+  "targets": []
+ },
+ {
+  "id": "restaurant",
+  "group": "旅行・日常",
+  "title": "レストランで食事",
+  "emoji": "🍽️",
+  "role": "a server at a casual American restaurant",
+  "setting": "At a restaurant for dinner, sitting at a table.",
+  "goal": "Ask for a recommendation, order a main dish and a drink, mention one food you can't eat, and ask for the check at the end.",
+  "goal_ja": "おすすめを聞いて料理と飲み物を注文し、苦手な食べ物を1つ伝え、最後に会計を頼む",
+  "opener": "Hi, I'm Jessica, and I'll be your server tonight. Can I start you off with something to drink?",
+  "opener_ja": "こんばんは、今夜担当するジェシカです。まずお飲み物はいかがですか？",
+  "phrases": [
+   {
+    "en": "What do you recommend?",
+    "ja": "おすすめは何ですか？"
+   },
+   {
+    "en": "I'll have the chicken sandwich, please.",
+    "ja": "チキンサンドをお願いします。"
+   },
+   {
+    "en": "Could I get it without onions?",
+    "ja": "玉ねぎ抜きにできますか？"
+   },
+   {
+    "en": "Could we get the check, please?",
+    "ja": "お会計をお願いします。"
+   }
+  ],
+  "twists": [
+   "The dish you want is sold out tonight.",
+   "The server asks how you would like your steak or eggs cooked.",
+   "The check has an item you did not order."
+  ],
+  "targets": []
+ },
+ {
+  "id": "shopping",
+  "group": "旅行・日常",
+  "title": "買い物をする",
+  "emoji": "🛍️",
+  "role": "a sales associate at a clothing store",
+  "setting": "In a clothing store at a shopping mall.",
+  "goal": "Ask for a different size of a jacket, ask if you can try it on, and ask about the return policy before you buy it.",
+  "goal_ja": "ジャケットの別のサイズを頼んで試着し、買う前に返品の条件を聞く",
+  "opener": "Hi! Are you looking for anything in particular today?",
+  "opener_ja": "こんにちは！今日は何かお探しですか？",
+  "phrases": [
+   {
+    "en": "Do you have this in a medium?",
+    "ja": "これのMサイズはありますか？"
+   },
+   {
+    "en": "Can I try it on?",
+    "ja": "試着してもいいですか？"
+   },
+   {
+    "en": "What's your return policy?",
+    "ja": "返品の条件はどうなっていますか？"
+   },
+   {
+    "en": "I'll take it.",
+    "ja": "これにします。"
+   }
+  ],
+  "twists": [
+   "Your size is out of stock in this store, but available online.",
+   "There is a sale today: buy one, get one 50% off.",
+   "The fitting room line is long, so the associate suggests another option."
+  ],
+  "targets": []
+ },
+ {
+  "id": "directions",
+  "group": "旅行・日常",
+  "title": "街で道を聞く",
+  "emoji": "🧭",
+  "role": "a friendly local person walking on the street",
+  "setting": "On a busy street downtown in the afternoon.",
+  "goal": "Ask how to get to the nearest subway station, check how long it takes to walk, and repeat the directions back to confirm.",
+  "goal_ja": "最寄りの駅への行き方と歩く時間を聞き、道順を言い直して確かめる",
+  "opener": "Hi, you look a little lost. Can I help you?",
+  "opener_ja": "こんにちは、ちょっと迷っているみたいですね。お手伝いしましょうか？",
+  "phrases": [
+   {
+    "en": "Excuse me, how do I get to the subway station?",
+    "ja": "すみません、地下鉄の駅にはどう行けばいいですか？"
+   },
+   {
+    "en": "Is it within walking distance?",
+    "ja": "歩いて行ける距離ですか？"
+   },
+   {
+    "en": "So I turn right at the second light?",
+    "ja": "2つ目の信号を右ですね？"
+   },
+   {
+    "en": "Thank you so much.",
+    "ja": "本当にありがとうございます。"
+   }
+  ],
+  "twists": [
+   "The local person is also not sure and suggests asking at a nearby store.",
+   "The station is closed for repairs, so you need to take a bus instead.",
+   "The local person gives directions very quickly and you need to ask them to slow down."
+  ],
+  "targets": []
+ },
+ {
+  "id": "pharmacy",
+  "group": "旅行・日常",
+  "title": "薬局で相談する",
+  "emoji": "💊",
+  "role": "a pharmacist at a drugstore",
+  "setting": "At the pharmacy counter of a drugstore.",
+  "goal": "Explain that you have a headache and a sore throat, ask what medicine you can buy, and check how often to take it.",
+  "goal_ja": "頭痛とのどの痛みを伝え、買える薬と飲み方（回数）を確かめる",
+  "opener": "Hi, how can I help you today?",
+  "opener_ja": "こんにちは。今日はどうされましたか？",
+  "phrases": [
+   {
+    "en": "I have a headache and a sore throat.",
+    "ja": "頭痛とのどの痛みがあります。"
+   },
+   {
+    "en": "Do I need a prescription for this?",
+    "ja": "これは処方箋が必要ですか？"
+   },
+   {
+    "en": "How often should I take it?",
+    "ja": "どのくらいの間隔で飲めばいいですか？"
+   },
+   {
+    "en": "Does it make you sleepy?",
+    "ja": "眠くなりますか？"
+   }
+  ],
+  "twists": [
+   "The pharmacist asks if you are allergic to any medicine.",
+   "The medicine you ask for needs a prescription, so the pharmacist suggests another one.",
+   "The pharmacist recommends seeing a doctor if it does not get better in a few days."
+  ],
+  "targets": []
+ },
+ {
+  "id": "weekend-chat",
+  "group": "旅行・日常",
+  "title": "週末の予定を雑談",
+  "emoji": "☀️",
+  "role": "Emma, a friendly coworker from an overseas office who is visiting your team",
+  "setting": "During a coffee break at the office on Friday afternoon.",
+  "goal": "Make small talk about weekend plans: ask about Emma's plans, share yours, and recommend one place or food in your city.",
+  "goal_ja": "週末の予定を聞き合い、自分の予定を話して、地元のおすすめを1つ紹介する",
+  "opener": "Happy Friday! Do you have any plans for the weekend?",
+  "opener_ja": "やっと金曜日ですね！週末は何か予定がありますか？",
+  "phrases": [
+   {
+    "en": "Not much, I'm just going to relax at home.",
+    "ja": "特に何も。家でのんびりする予定です。"
+   },
+   {
+    "en": "How about you?",
+    "ja": "あなたは？"
+   },
+   {
+    "en": "You should try the ramen place near the station.",
+    "ja": "駅の近くのラーメン屋に行ってみてください。"
+   },
+   {
+    "en": "Have a great weekend!",
+    "ja": "よい週末を！"
+   }
+  ],
+  "twists": [
+   "Emma invites you to join her weekend plan.",
+   "Emma asks about a Japanese custom and you need to explain it simply.",
+   "Emma's plans got canceled, so she asks you for ideas."
+  ],
+  "targets": []
+ }
+]
