@@ -1,0 +1,16 @@
+{
+ "format": 1,
+ "id": "2026-W47",
+ "published": "2026-11-16",
+ "words": [
+  {"word": "follow up", "category": "general", "meaning": "（あとで）連絡する・追って確認する", "pos": "句動詞", "ipa": "/ˈfɑloʊ ʌp/", "stress": "FOL-low up", "stressNote": "fol を強く", "example": "I'll follow up with you by email after the session.", "translation": "セッションの後、メールで改めてご連絡します。", "synonyms": ["get back to", "check in"], "tip": "follow の l は舌先を上の歯の裏に付ける", "source": "会話の頻出表現（共通教材）"},
+  {"word": "rollout", "category": "tech", "meaning": "（機能などの）段階的な提供開始", "pos": "名詞", "ipa": "/ˈroʊlaʊt/", "stress": "ROLL-out", "stressNote": "roll を強く", "example": "The rollout will start with a small group of users.", "translation": "提供は、まず少人数の利用者から始まります。", "synonyms": ["release", "launch"], "tip": "r は舌をどこにも付けずに丸める", "source": "仕事の頻出表現（共通教材）"}
+ ],
+ "sentences": [
+  {"id": "k2026w47-s01", "text": "Could you share the slides after the session?", "ja": "セッションの後でスライドを共有していただけますか？", "category": "conversation", "scene": "質疑応答", "focus": ["share"], "source": "会話文（共通教材）"},
+  {"id": "k2026w47-s02", "text": "The rollout will start with a small group of users.", "ja": "提供は、まず少人数の利用者から始まります。", "category": "conference", "scene": "セッション", "focus": ["rollout"], "source": "セッション文（共通教材）"}
+ ],
+ "scenes": [
+  {"id": "k2026w47-c1", "group": "旅行・日常", "title": "ホテルで部屋を替えてもらう", "emoji": "🏨", "role": "a front desk clerk at a busy hotel near a conference venue", "setting": "At the hotel front desk in the evening, after a long conference day.", "goal": "Explain a problem with your room and ask to change rooms.", "goal_ja": "部屋の問題を説明して、部屋を替えてもらう", "opener": "Good evening. How can I help you?", "opener_ja": "こんばんは。どうなさいましたか？", "phrases": [{"en": "The air conditioner isn't working.", "ja": "エアコンが動きません。"}, {"en": "Would it be possible to change rooms?", "ja": "部屋を替えていただくことはできますか？"}, {"en": "That would be great, thank you.", "ja": "それは助かります、ありがとうございます。"}], "twists": ["The hotel is almost full, so only a smaller room is available.", "The clerk offers to send a technician first."], "targets": ["follow up"]}
+ ]
+}

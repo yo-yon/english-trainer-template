@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.18.1";
+const APP_VERSION = "0.19.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -918,11 +918,14 @@ function nextSentence() {
 /* ================= 会話ロールプレイ（Phase 2a） =================
    場面を選ぶ → 相手（AI）の最初の一言 → 「話す」で返事 → 相手の返事（読み上げ） … → 振り返り
    相手の発言は、最初は文字を隠す（聞き取り重視）。録音はシャドーイングと同じ仕組み（音量メーター・感度） */
-let scenes = null, talk = null;
+let scenes = null, talk = null, seedScenes = null;
 const micBusy = () => recording || !!(talk && talk.listening) || !!(comp && comp.state === "listening");
 async function loadScenes() {
   if (scenes) return scenes;
-  try { scenes = await (await fetch("/seed/scenes.json", { cache: "no-store" })).json(); } catch (e) { scenes = []; }
+  if (!seedScenes) { try { seedScenes = await (await fetch("/seed/scenes.json", { cache: "no-store" })).json(); } catch (e) { seedScenes = []; } }
+  // 共通の教材パックの場面（Table）を後ろに足す。同じ ID は元の教材を優先
+  const ids = new Set(seedScenes.map((x) => x.id));
+  scenes = [...seedScenes, ...((data.scenes || []).filter((x) => x && !ids.has(x.id)))];
   return scenes;
 }
 function talkCountToday() { const l = st().talkLog; return l && l.date === S.ymd() ? l.count : 0; }
@@ -1706,6 +1709,7 @@ function renderList() {
         <pre class="note" id="diag-body" style="white-space:pre-wrap;word-break:break-all;margin:8px 0">${esc(diagText())}</pre>
         <button class="btn" id="diag-refresh">更新</button>
       </details>
+      ${contentHTML()}
       <details ${data.words.length ? "" : "open"}><summary>データ管理</summary>
         <p class="note">最初に入っている単語とシャドーイング用の文を取り込みます。同じIDのデータは上書きされます（復習の記録は消えません）。</p>
         <button class="btn" id="import">初期データを取り込む</button>
@@ -1729,7 +1733,49 @@ function renderList() {
   bindGainSelect("gain-sel-list", () => { renderList(); renderShadow(); });
   $("diag-refresh").onclick = async () => { await refreshOutputs(); $("diag-body").textContent = diagText(); };
   $("import").onclick = importSeed;
+  if ($("content-pull")) {
+    $("content-pull").onclick = () => pullContent(false);
+    $("content-auto").onchange = (e) => { st().contentAuto = e.target.checked; saveSettings(); };
+  }
   $("fb-details").ontoggle = (e) => { if (e.target.open && !fbHistory) loadFbHistory(); };
+}
+/* ---------- 共通の教材（v0.19.0） ----------
+   作者が毎週公開する一般的な教材（単語・文・会話の場面）を、自分の Table に取り込む。週1回は自動、ボタンでいつでも */
+function contentHTML() {
+  const c = data.content;
+  if (!c || !c.enabled) return "";
+  const last = c.last ? `前回届いた分：${esc(c.last.packs.join("・"))}（単語${c.last.words}語・文${c.last.sentences}文・場面${c.last.scenes}）` : "まだ届いていません";
+  return `<div class="sharebox">
+      <p style="margin:0"><b>共通の教材</b> <span class="note">毎週、単語・文・会話の場面が届きます（字幕ログを使わない一般的な教材）</span></p>
+      <label><input type="checkbox" id="content-auto" ${st().contentAuto !== false ? "checked" : ""}> 週に1回、自動で取り込む</label>
+      <p class="note" style="margin:0">${last}${c.lastCheck ? `。最後の確認：${esc(S.ymd(Date.parse(c.lastCheck)))}` : ""}</p>
+      <button class="btn" id="content-pull">新しい教材を取り込む</button>
+    </div>`;
+}
+let contentBusy = false;
+async function pullContent(auto) {
+  if (contentBusy || !data.content || !data.content.enabled) return;
+  if (auto && st().contentAuto === false) return;
+  contentBusy = true;
+  const b = $("content-pull"); if (b) { b.disabled = true; b.textContent = "確認しています…"; }
+  try {
+    const r = await api("content-pull", { method: "POST", body: JSON.stringify({ auto: !!auto }) });
+    if (r && r.skipped) return;
+    const a = (r && r.added) || { words: 0, sentences: 0, scenes: 0 };
+    const n = a.words + a.sentences + a.scenes;
+    if (n) {
+      showBanner(`共通の教材が届きました：単語${a.words}語・文${a.sentences}文・会話の場面${a.scenes}つ${r.more ? "（続きは次の確認で届きます）" : ""}`);
+      scenes = null; await load();
+    } else if (!auto) {
+      showBanner(r && r.errors && r.errors.length ? "教材を取り込めませんでした。時間をおいてもう一度試してください。" : "新しい教材はありません。");
+      if (data.content) data.content.lastCheck = r && r.lastCheck;
+    }
+  } catch (e) {
+    if (!auto) showBanner(e.status === 409 ? "共通の教材はオフになっています（CONTENT_FEED_URL）。" : "教材の置き場に接続できませんでした。時間をおいてもう一度試してください。");
+  } finally {
+    contentBusy = false;
+    if (!$("view-list").hidden) renderList();
+  }
 }
 async function importSeed() {
   if (data.words.length && !confirm("すでにデータがあります。初期データで上書きしますか？（同じIDの単語・文・復習状態が上書きされます）")) return;
@@ -1924,6 +1970,7 @@ async function load() {
     saveSettings();
   }
   loaded = true;
+  scenes = null; // 共通の教材の場面を読み直す
   maybeAskShare();
   buildWordQueue(); buildSentenceQueue();
   renderStudy();
@@ -1933,7 +1980,7 @@ async function load() {
 }
 renderStudy();
 refreshOutputs();
-load().catch((e) => { if (e.message !== "auth") { loaded = true; showBanner("データを読み込めませんでした。ページを開き直してください。"); renderStudy(); } });
+load().then(() => pullContent(true)).catch((e) => { if (e.message !== "auth") { loaded = true; showBanner("データを読み込めませんでした。ページを開き直してください。"); renderStudy(); } });
 /* 別の端末で学習したあとに戻ってきたら読み直す（スマホとPCの同期） */
 /* ---------- 新しい版の確認 ----------
    iPhone の Chrome は、タブを開き直してもページを読み込み直さず、前の画面をそのまま出すことがある。
