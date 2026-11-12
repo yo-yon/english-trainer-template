@@ -31,3 +31,13 @@ test("言い換えから保存したときは、直す前の言い方も残す",
   assert.equal(r.item.before, "I have question.");
   assert.equal(P.cleanPhrase({ text: "Thanks a lot!" }).item.before, "");
 });
+
+test("あとから付ける訳：日本語を含むときだけ受け付ける", () => {
+  assert.equal(P.cleanTranslation({ ja: "  もう一度言ってもらえますか？ " }), "もう一度言ってもらえますか？");
+  assert.equal(P.cleanTranslation({ ja: "Could you say that again?" }), "");
+  assert.equal(P.cleanTranslation({}), "");
+  assert.equal(P.cleanTranslation(null), "");
+  const m = P.translateMessages({ text: "Could you say that again?", scene: "カフェ" });
+  assert.equal(m.length, 2);
+  assert.match(m[1].content, /Could you say that again\?/);
+});

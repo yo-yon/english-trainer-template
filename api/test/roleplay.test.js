@@ -45,7 +45,7 @@ test("出力の整形：長さを切り、空の返事は聞き返しにする",
   assert.equal(t.goal_reached, true);
   const r = R.cleanReview({ good: ["a", "b", "c", "d"], corrections: [{ you: "x", better: "y" }, { you: "", better: "z" }], phrases: [{ en: "p" }, {}, { en: "q", ja: "く" }] });
   assert.equal(r.good.length, 3);
-  assert.deepEqual(r.corrections, [{ you: "x", better: "y", note: "" }]);
+  assert.deepEqual(r.corrections, [{ you: "x", better: "y", ja: "", note: "" }]);
   assert.deepEqual(r.phrases.map((p) => p.en), ["p", "q"]);
   assert.deepEqual(R.cleanReview(null), { summary_ja: "", goal_reached: false, good: [], corrections: [], phrases: [] });
 });

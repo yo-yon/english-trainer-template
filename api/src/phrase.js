@@ -34,4 +34,24 @@ function findDuplicate(existing, text) {
   return existing.find((p) => norm(p.text) === k) || null;
 }
 
-module.exports = { cleanPhrase, findDuplicate, MAX_PHRASES, norm };
+/** 訳のない表現に、あとから日本語訳を付けるための AI への指示 */
+function translateMessages(item) {
+  return [
+    {
+      role: "system",
+      content:
+        "You translate short spoken English phrases for a Japanese learner. " +
+        "Give one natural Japanese translation that fits casual conversation. Keep it under 60 Japanese characters. " +
+        'Return only JSON: {"ja": "..."}',
+    },
+    { role: "user", content: `Scene: ${clip(item.scene, 40) || "conversation"}\nPhrase: ${clip(item.text, 200)}` },
+  ];
+}
+
+/** AI の訳を検査する。日本語が含まれていなければ空 */
+function cleanTranslation(o) {
+  const ja = clip(o && o.ja, 200);
+  return hasJa(ja) ? ja : "";
+}
+
+module.exports = { cleanPhrase, findDuplicate, translateMessages, cleanTranslation, MAX_PHRASES, norm };
