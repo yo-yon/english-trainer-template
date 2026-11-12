@@ -275,15 +275,37 @@ app.http("composeJudge", {
 });
 
 /* ---------- フレーズ帳（Phase 2b） ----------
-   POST：保存（同じ表現があればそれを返す）／DELETE：削除（復習状態も消す） */
+   POST：保存（同じ表現があればそれを返す）／DELETE：削除（復習状態も消す）
+   PATCH phrase/{id} {action:"translate"}：訳のない表現に AI で日本語訳を付けて保存する（1件につき1回だけ。
+   1日 TRANSLATE_DAILY_LIMIT 回まで、既定 100） */
 app.http("phrase", {
   route: "phrase/{id?}",
-  methods: ["POST", "DELETE"],
+  methods: ["POST", "PATCH", "DELETE"],
   authLevel: "anonymous",
   handler: async (request, context) => {
     const denied = requireOwner(request);
     if (denied) return denied;
     try {
+      if (request.method === "PATCH") {
+        const id = request.params.id || "";
+        if (!/^p[a-z0-9]{4,20}$/.test(id)) return bad("id");
+        let b;
+        try { b = await request.json(); } catch { return bad("body"); }
+        if (!b || b.action !== "translate") return bad("action");
+        const item = await getOne("phrase", id);
+        if (!item) return { status: 404, jsonBody: { error: "not_found" } };
+        if (item.ja) return { jsonBody: { item } }; // すでに訳があれば AI を呼ばない
+        const limit = Number(process.env.TRANSLATE_DAILY_LIMIT) || 100;
+        const uk = roleplay.usageKey().replace("roleplay-", "translate-");
+        const used = (await getOne("usage", uk)) || { count: 0 };
+        if (used.count >= limit) return { status: 429, jsonBody: { error: "daily_limit", limit } };
+        await upsert("usage", uk, { count: used.count + 1 });
+        const ja = phrase.cleanTranslation(await callLLM(phrase.translateMessages(item), 200));
+        if (!ja) return { status: 502, jsonBody: { error: "no_translation" } };
+        const next = { ...item, ja };
+        await upsert("phrase", id, next);
+        return { jsonBody: { item: next }, headers: { "Cache-Control": "no-store" } };
+      }
       if (request.method === "DELETE") {
         const id = request.params.id || "";
         if (!/^p[a-z0-9]{4,20}$/.test(id)) return bad("id");
@@ -302,6 +324,7 @@ app.http("phrase", {
       await upsert("phrase", r.item.id, r.item);
       return { status: 201, jsonBody: { item: r.item, duplicate: false } };
     } catch (e) {
+      if (e.code === "no_llm") return { status: 503, jsonBody: { error: "no_llm" } };
       return fail(context, e);
     }
   },

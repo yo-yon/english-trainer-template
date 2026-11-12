@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.18.0";
+const APP_VERSION = "0.18.1";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -372,12 +372,12 @@ function renderShadow() {
     <div class="row between"><span class="chip">${c ? "復習" : "新しい文"} · ${esc(s.scene || "")}${rc === "ok" ? " · ✓ 思い出せた" : rc === "ng" ? " · もう一度覚える" : ""}</span>
       <span class="row" style="gap:8px"><span class="note">${c && c.best != null ? "最高 " + c.best + "点" : ""}</span><button class="fbbtn" data-fb="sentence" aria-label="この文の内容や評価を報告">👎</button></span></div>
     <p class="sent ${hide ? "hidden" : ""}" id="sent-text">${esc(s.text)}</p>
-    ${sShowJa ? `<p class="tr" style="margin:-6px 0 0">${esc(s.ja)}</p>` : ""}
+    ${sShowJa ? `<p class="tr" style="margin:-6px 0 0">${s.ja ? esc(s.ja) : jaPending.has(s.id) ? '<span class="note">訳を作っています…</span>' : '<span class="note">訳がありません</span>'}</p>` : ""}
     <div class="row">
       <button class="btn" data-say="${esc(s.text)}">${SPK}お手本</button>
       <button class="btn" data-say="${esc(s.text)}" data-rate="0.7">${SLOW}ゆっくり</button>
       <button class="btn" data-say="${esc(s.text)}" data-rate="0.5">${SLOW}さらにゆっくり</button>
-      <button class="btn" id="toggle-ja">${sShowJa ? "訳を隠す" : "訳を見る"}</button>
+      ${s.ja || s.phrase ? `<button class="btn" id="toggle-ja">${sShowJa ? "訳を隠す" : "訳を見る"}</button>` : ""}
       ${hide ? `<button class="btn" id="show-text">文を見る</button>` : ""}
     </div>
     <div class="row" style="gap:12px">${outputSelectHTML("out-sel-shadow")}${gainSelectHTML("gain-sel-shadow")}</div>
@@ -418,7 +418,7 @@ function renderShadow() {
   }
   h += `</article>`;
   v.innerHTML = h;
-  $("toggle-ja").onclick = () => { sShowJa = !sShowJa; renderShadow(); };
+  if ($("toggle-ja")) $("toggle-ja").onclick = () => { sShowJa = !sShowJa; if (sShowJa) ensureJa(s); renderShadow(); };
   if ($("show-text")) $("show-text").onclick = () => { $("sent-text").classList.remove("hidden"); $("show-text").remove(); };
   $("rec").onclick = () => (recording ? stopRec && stopRec() : startAssessment());
   bindOutputSelect("out-sel-shadow", renderShadow);
@@ -524,13 +524,14 @@ function drillHTML() {
 
 /* フレーズ帳：思い出す → 答え合わせ → 自己判定 */
 function renderRecall(v, s, c, rc) {
+  if (!s.ja && !s.before) ensureJa(s); // 手がかり（訳）が無いと思い出す練習にならないので、1回だけ訳を作る
   const words = s.text.split(/\s+/);
   v.innerHTML = `<article class="card recall" aria-live="polite">
     <div class="row between"><span class="chip">📒 フレーズ帳 · ${c ? "復習" : "新しい表現"} · ${esc(s.scene || "")}</span><span class="note">${c && c.best != null ? "最高 " + c.best + "点" : ""}</span></div>
     <p class="note" style="margin:0">${s.before ? "もっと自然に言うと？ 英語で声に出してみましょう" : "英語で何と言う？ 声に出してみましょう"}</p>
     ${s.before ? `<p class="cue"><span class="note">直す前：</span>${esc(s.before)}</p>` : ""}
     ${s.ja ? `<p class="cue">${esc(s.ja)}</p>` : ""}
-    ${!s.before && !s.ja ? `<p class="cue">（場面：${esc(s.scene || "")}）</p>` : ""}
+    ${!s.before && !s.ja ? `<p class="cue">${jaPending.has(s.id) ? '<span class="note">訳を作っています…</span>' : `（場面：${esc(s.scene || "")}）`}</p>` : ""}
     ${rc === "ask"
       ? `${sRecall.hint && sRecall.id === s.id ? `<p class="note" style="margin:0">ヒント：${esc(words.slice(0, 2).join(" "))} …（${words.length}語）</p>` : ""}
         <div class="row">${sRecall.hint && sRecall.id === s.id ? "" : `<button class="btn" id="rc-hint">ヒント</button>`}<button class="btn primary" id="rc-show" style="width:auto;flex:1">答えを見る</button></div>`
@@ -1002,7 +1003,7 @@ function renderTalkReview(v) {
     ${(r.targets || []).length ? `<div><b class="note">使ってみたい表現</b><div class="row" style="margin-top:4px">${r.targets.map((t) => `<span class="chip ${(r.targets_used || []).includes(t) ? "used" : ""}">${(r.targets_used || []).includes(t) ? "✓" : "–"} ${esc(t)}</span>`).join("")}</div>
       ${(r.wordUpdates || []).length ? `<p class="note" style="margin:6px 0 0">単語帳に反映：${r.wordUpdates.map((u) => `${esc(u.word)} → ${u.used ? "使えたので次回を " + u.when + " に" : "次回を " + u.when + " に前倒し"}`).join("、")}</p>` : ""}</div>` : ""}
     ${r.good.length ? `<div><b class="note">よかった点</b><ul class="rv">${r.good.map((g) => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}
-    ${r.corrections.length ? `<div><b class="note">もっと自然な言い方</b><div class="list" style="margin-top:6px">${r.corrections.map((c) => `<div class="li"><div class="grow"><div class="m">あなた：${esc(c.you)}</div><div class="s">→ ${esc(c.better)}</div>${c.note ? `<div class="m">${esc(c.note)}</div>` : ""}</div><button class="iconbtn" data-say="${esc(c.better)}" aria-label="読み上げ">${SPK}</button>${saveBtn(c.better, "", "correction", c.you)}</div>`).join("")}</div></div>` : ""}
+    ${r.corrections.length ? `<div><b class="note">もっと自然な言い方</b><div class="list" style="margin-top:6px">${r.corrections.map((c) => `<div class="li"><div class="grow"><div class="m">あなた：${esc(c.you)}</div><div class="s">→ ${esc(c.better)}</div>${c.note ? `<div class="m">${esc(c.note)}</div>` : ""}</div><button class="iconbtn" data-say="${esc(c.better)}" aria-label="読み上げ">${SPK}</button>${saveBtn(c.better, c.ja || "", "correction", c.you)}</div>`).join("")}</div></div>` : ""}
     ${r.phrases.length ? `<div><b class="note">覚えたいフレーズ</b><div class="list" style="margin-top:6px">${r.phrases.map((p) => `<div class="li"><button class="iconbtn" data-say="${esc(p.en)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="s">${esc(p.en)}</div><div class="m">${esc(p.ja)}</div></div>${saveBtn(p.en, p.ja, "review")}</div>`).join("")}</div>
       <p class="note" style="margin:6px 0 0">「＋保存」でフレーズ帳に入り、シャドーイングで練習できます。</p></div>` : ""}
     <details><summary class="note">会話の全文</summary><div class="talk-log" style="margin-top:8px">${talk.history.map((t) => `<div class="bubble ${t.who}">${esc(t.text)}${t.ja ? `<p class="tr" style="margin:4px 0 0">${esc(t.ja)}</p>` : ""}</div>`).join("")}</div></details>
@@ -1157,6 +1158,26 @@ function phraseToSentence(p) {
   return { id: p.id, text: p.text, ja: p.ja || "", before: p.before || "", scene: p.scene || "フレーズ帳", category: "conversation", focus: [], source: "フレーズ帳", order: -1, phrase: true };
 }
 const isSaved = (en) => data.phrases.some((p) => normEn(p.text) === normEn(en));
+/* 訳のないフレーズ（以前「もっと自然な言い方」から保存したものなど）に、AI で訳を付けて保存する。
+   1件につき1回だけ呼ぶ（失敗したらこの画面を開き直すまで呼ばない） */
+const jaPending = new Set(), jaTried = new Set();
+async function ensureJa(s) {
+  if (!s || s.ja || !s.phrase || jaPending.has(s.id) || jaTried.has(s.id)) return;
+  jaPending.add(s.id); jaTried.add(s.id);
+  try {
+    const r = await api(`phrase/${encodeURIComponent(s.id)}`, { method: "PATCH", body: JSON.stringify({ action: "translate" }) });
+    const ja = r && r.item && r.item.ja;
+    if (ja) {
+      s.ja = ja;
+      const p = data.phrases.find((x) => x.id === s.id); if (p) p.ja = ja;
+      for (const x of data.sentences) if (x.id === s.id) x.ja = ja;
+    }
+  } catch (e) {
+    showBanner(e.status === 429 ? "今日の訳の作成は上限に達しました。明日もう一度開いてください。" : e.status === 503 ? "AI の設定がないため、訳を作れません。" : "訳を作れませんでした。");
+  }
+  jaPending.delete(s.id);
+  if (sCur === s) renderShadow();
+}
 function saveBtn(en, ja, from, before = "") {
   if (!en) return "";
   return isSaved(en)

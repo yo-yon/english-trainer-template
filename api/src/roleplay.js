@@ -75,9 +75,9 @@ function reviewMessages(scene, history) {
         "Write all explanations in natural Japanese. Return only JSON:\n" +
         '{"summary_ja": "全体の一言（80文字以内）", "goal_reached": true,\n' +
         ' "good": ["よかった点（日本語、各40文字以内、1〜3個）"],\n' +
-        ' "corrections": [{"you": "学習者の実際の発言", "better": "より自然な英語", "note": "理由（日本語40文字以内）"}],\n' +
+        ' "corrections": [{"you": "学習者の実際の発言", "better": "より自然な英語", "ja": "better の自然な日本語訳", "note": "理由（日本語40文字以内）"}],\n' +
         ' "phrases": [{"en": "この場面で覚えたい英語のフレーズ", "ja": "日本語訳"}]}\n' +
-        "corrections: at most 5, only where a native speaker would say it differently. phrases: exactly 3, short and reusable in this scene." +
+        "corrections: at most 5, only where a native speaker would say it differently. phrases: exactly 3, short and reusable in this scene. Always fill \"ja\" for every correction and phrase." +
         (scene.targets.length
           ? `\nThe learner also wanted to try these expressions: ${scene.targets.map((t) => `"${t}"`).join(", ")}. Add "targets_used": [the ones the learner actually used, allowing small changes in form].`
           : ""),
@@ -117,7 +117,7 @@ function cleanReview(o) {
     goal_reached: !!(o && o.goal_reached),
     good: arr(o && o.good, 3).map((s) => clip(s, 80)).filter(Boolean),
     corrections: arr(o && o.corrections, 5)
-      .map((c) => ({ you: clip(c && c.you, MAX_TEXT), better: clip(c && c.better, 300), note: clip(c && c.note, 80) }))
+      .map((c) => ({ you: clip(c && c.you, MAX_TEXT), better: clip(c && c.better, 300), ja: clip(c && c.ja, 120), note: clip(c && c.note, 80) }))
       .filter((c) => c.you && c.better),
     phrases: arr(o && o.phrases, 3).map((p) => ({ en: clip(p && p.en, 160), ja: clip(p && p.ja, 120) })).filter((p) => p.en),
   };
