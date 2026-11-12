@@ -2,6 +2,17 @@
 
 更新の取り込み方は [docs/UPDATING.md](docs/UPDATING.md) を見てください。
 
+## 0.19.0（2026-11-12）
+
+変わったファイル：`src/app.js`、`api/src/functions/index.js`、`api/src/pack.js`（新規）、`api/test/pack.test.js`・`api/test/fixtures/pack-sample.json`（新規）、`SETUP.md`
+
+**更新するときの注意**：追加の Azure リソースや必須の環境変数はありません。`api/src/pack.js` は新しいファイルなので、方法1で更新するときは新規作成してください。
+
+- **共通の教材**：作者が毎週公開する単語（約70）・シャドーイングの文（約35）・会話の場面（7）を、週1回自動で取り込みます（公開リポジトリ [yo-yon/english-trainer-content](https://github.com/yo-yon/english-trainer-content)）。字幕ログや利用者のデータは使っていない、一般的な教材です
+- 一覧タブに「新しい教材を取り込む」ボタンと、自動の取り込みのオンオフ。初めて取り込むときは、これまでに公開された分がまとめて届きます（1日に出題する新しい単語・文の数は変わりません）
+- アプリは教材の置き場を読みに行くだけで、何も送りません。取り込みたくない場合は `CONTENT_FEED_URL` を `off` に
+- 取り込む前に、アプリ側でも形式を検査します。自分で足した単語と同じ単語は上書きしません
+
 ## 0.18.1（2026-11-12）
 
 変わったファイル：`src/app.js`、`api/src/functions/index.js`、`api/src/phrase.js`、`api/src/roleplay.js`、`api/test/phrase.test.js`・`roleplay.test.js`、`SETUP.md`

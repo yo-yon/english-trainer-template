@@ -4,6 +4,7 @@ const share = require("../share");
 const roleplay = require("../roleplay");
 const phrase = require("../phrase");
 const compose = require("../compose");
+const pack = require("../pack");
 
 const KINDS = { word: "card-word", sentence: "card-sentence", compose: "card-compose", dict: "card-dict" };
 
@@ -50,7 +51,7 @@ app.http("state", {
     const denied = requireOwner(request);
     if (denied) return denied;
     try {
-      const [words, sentences, wordCards, sentenceCards, settings, phrases, composeCards, dictCards] = await Promise.all([
+      const [words, sentences, wordCards, sentenceCards, settings, phrases, composeCards, dictCards, packScenes, content] = await Promise.all([
         listPartition("word"),
         listPartition("sentence"),
         listPartition("card-word"),
@@ -59,10 +60,13 @@ app.http("state", {
         listPartition("phrase"),
         listPartition("card-compose"),
         listPartition("card-dict"),
+        listPartition("scene"),
+        getOne("settings", "content"),
       ]);
       const toMap = (arr) => Object.fromEntries(arr.map(({ id, ...s }) => [id, s]));
       return {
-        jsonBody: { words, sentences, phrases, cards: { word: toMap(wordCards), sentence: toMap(sentenceCards), compose: toMap(composeCards), dict: toMap(dictCards) }, settings: settings || {}, hub: { enabled: share.hubEnabled() } },
+        jsonBody: { words, sentences, phrases, cards: { word: toMap(wordCards), sentence: toMap(sentenceCards), compose: toMap(composeCards), dict: toMap(dictCards) }, settings: settings || {}, hub: { enabled: share.hubEnabled() },
+          scenes: packScenes, content: { enabled: !!feedUrl(), lastCheck: (content && content.lastCheck) || null, packs: (content && content.imported) || [], last: (content && content.last) || null } },
         headers: { "Cache-Control": "no-store" },
       };
     } catch (e) {
@@ -241,6 +245,71 @@ app.http("roleplay", {
       return { jsonBody: { ...out, remaining: Math.max(0, limit - used.count - 1) }, headers: { "Cache-Control": "no-store" } };
     } catch (e) {
       if (e.code === "no_llm") return { status: 503, jsonBody: { error: "no_llm" } };
+      return fail(context, e);
+    }
+  },
+});
+
+/* ---------- 共通の教材パック（v0.19.0） ----------
+   公開リポジトリ yo-yon/english-trainer-content の一覧（index.json）を読み、まだ取り込んでいない週のパックを Table に追加する。
+   字幕ログに頼らない一般的な教材だけ。復習状態には触れず、自分の教材と同じ単語は上書きしない（単語の ID は単語から作る）。
+   CONTENT_FEED_URL で一覧の URL を変えられる。off にすると取り込まない。読みに行くだけで、こちらからは何も送らない */
+function feedUrl() {
+  const v = (process.env.CONTENT_FEED_URL || "").trim();
+  if (v.toLowerCase() === "off") return null;
+  return v || pack.DEFAULT_FEED;
+}
+async function fetchJson(url) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" }, redirect: "error" });
+  if (!r.ok) throw Object.assign(new Error(`feed ${r.status}`), { code: "feed" });
+  const t = await r.text();
+  if (t.length > pack.LIMITS.bytes) throw Object.assign(new Error("feed too large"), { code: "feed" });
+  try { return JSON.parse(t); } catch { throw Object.assign(new Error("feed json"), { code: "feed" }); }
+}
+app.http("contentPull", {
+  route: "content-pull",
+  methods: ["POST"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      const url = feedUrl();
+      if (!url) return { status: 409, jsonBody: { error: "disabled" } };
+      let b = {};
+      try { b = (await request.json()) || {}; } catch { /* 本文なしも可 */ }
+      const cur = (await getOne("settings", "content")) || { imported: [] };
+      // 自動の取り込みは前回の確認から7日たったときだけ（手動のボタンはいつでも）
+      if (b.auto && !pack.dueForCheck(cur.lastCheck)) return { jsonBody: { skipped: true, lastCheck: cur.lastCheck } };
+      const now = new Date().toISOString();
+      const index = await fetchJson(url);
+      const pend = pack.pendingPacks(index, cur.imported);
+      if (pend.error) throw Object.assign(new Error("index"), { code: "feed" });
+
+      const existing = new Set((await listPartition("word")).map((w) => w.id));
+      const added = { words: 0, sentences: 0, scenes: 0 }, packs = [], errors = [];
+      for (const x of pend.packs) {
+        let r;
+        try { r = pack.cleanPack(await fetchJson(pack.packUrl(url, x.file)), x.id); } catch (e) { errors.push({ id: x.id, error: "fetch" }); break; }
+        if (r.errors) { errors.push({ id: x.id, error: "invalid", detail: r.errors.slice(0, 5) }); context.warn(`pack ${x.id} invalid: ${r.errors.join(" / ")}`); continue; }
+        const words = r.words.filter((w) => !existing.has(w.id));
+        words.forEach((w) => existing.add(w.id));
+        await upsertMany("word", words);
+        await upsertMany("sentence", r.sentences);
+        await upsertMany("scene", r.scenes);
+        added.words += words.length; added.sentences += r.sentences.length; added.scenes += r.scenes.length;
+        packs.push(x.id);
+      }
+      // 形式の不備で断ったパックは「取り込み済み」にしない（作者が直せば、次の確認で取り込まれる）
+      const done = [...(cur.imported || []), ...packs];
+      const next = { imported: [...new Set(done)].slice(-520), lastCheck: now, last: packs.length ? { at: now, packs, ...added } : cur.last || null };
+      await upsert("settings", "content", next);
+      return { jsonBody: { added, packs, errors, more: !!pend.more, lastCheck: now }, headers: { "Cache-Control": "no-store" } };
+    } catch (e) {
+      if (e.code === "feed" || e.name === "TimeoutError" || e.name === "AbortError" || e instanceof TypeError) {
+        context.warn("content feed: " + e.message);
+        return { status: 502, jsonBody: { error: "feed" } };
+      }
       return fail(context, e);
     }
   },
