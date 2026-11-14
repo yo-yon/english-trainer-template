@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.21.0";
+const APP_VERSION = "0.22.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -58,7 +58,7 @@ function browserSay(text, rate) {
 /* 再生は Web Audio で行う（AudioContext は録音にも使う）。
    出力先を明示的に選んだときだけ <audio> 要素で再生する（setSinkId は <audio> 要素にしかない）。
    iPhone では <audio> 要素で再生した後、録音が無音になったため（v0.5.2）、既定では使わない */
-let audioCtx = null, playing = null;
+let audioCtx = null, playing = null, compareTimer = null; // compareTimer：聞き比べでお手本を鳴らす待ち
 const player = new Audio();
 player.setAttribute("playsinline", ""); player.preload = "auto";
 let playerUnlocked = false;
@@ -81,6 +81,7 @@ function unlockAudio() {
   }
 }
 function stopAudio() {
+  clearTimeout(compareTimer); compareTimer = null;
   try { playing && playing.stop(); } catch (e) {} playing = null;
   try { player.pause(); } catch (e) {}
   try { speechSynthesis.cancel(); } catch (e) {}
@@ -490,6 +491,7 @@ function renderShadow() {
         <b>${fb.verdict.level === "ok" ? "✓" : fb.verdict.level === "mid" ? "△" : "✕"} ${esc(fb.verdict.en)}（${esc(fb.verdict.ja)}）</b>
         <span>${esc(fb.verdict.msg)}</span>
       </div>
+      ${myRecHTML(s.text)}
       <div class="scores">
         <div class="sc main"><div class="v">${r.judge}</div><div class="k">判定点</div></div>
         <div class="sc"><div class="v">${r.acc}</div><div class="k">正確さ</div></div>
@@ -524,6 +526,7 @@ function renderShadow() {
   if ($("drill-rec")) $("drill-rec").onclick = () => (drillRec ? stopRec && stopRec() : drillRecord());
   if ($("drill-close")) $("drill-close").onclick = () => { drill = null; renderShadow(); };
   if ($("rec-play")) $("rec-play").onclick = playRecDiag;
+  bindMyRec(s.text);
 }
 
 /* 音の口の形（唇・舌・声）。発音記号だけでは分かりにくいので、近い日本語の音と口の動きで示す。
@@ -853,17 +856,39 @@ function recDiagText(d) {
   const rate = d.trackRate && d.trackRate !== d.ctxRate ? `処理 ${d.ctxRate}Hz／マイク ${d.trackRate}Hz` : `${d.ctxRate}Hz`;
   return `理由：${d.why}／送った音声 ${d.sentSec}秒・実際 ${d.wallSec}秒（${rate}）／${profText(d.prof, d.gain)}／発音評価なしでの認識：${d.plain || "未実施"}${d.variants ? "／設定を変えた再評価：" + d.variants : ""}／お手本：${d.ref}`;
 }
-// 送った 16kHz の音声を、端末の再生用の周波数に直して鳴らす
-function playRecDiag() {
-  const d = recDiag; if (!d || !d.pcm.length) return;
-  unlockAudio(); if (!audioCtx) return;
-  const n = d.pcm.reduce((s, c) => s + c.length, 0);
+// 送った 16kHz の音声を、端末の再生用の周波数に直して鳴らす。鳴らした長さ（秒）を返す
+function playPcm(chunks) {
+  if (!chunks || !chunks.length) return 0;
+  unlockAudio(); if (!audioCtx) return 0;
+  const n = chunks.reduce((s, c) => s + c.length, 0);
   const rate = audioCtx.sampleRate, m = Math.floor((n * rate) / 16000);
   const src = new Float32Array(n); let o = 0;
-  for (const c of d.pcm) { for (let i = 0; i < c.length; i++) src[o + i] = c[i] / 32768; o += c.length; }
+  for (const c of chunks) { for (let i = 0; i < c.length; i++) src[o + i] = c[i] / 32768; o += c.length; }
   const buf = audioCtx.createBuffer(1, m, rate), ch = buf.getChannelData(0);
   for (let i = 0; i < m; i++) { const t = (i * 16000) / rate, a = Math.floor(t), f = t - a; ch[i] = (src[a] || 0) * (1 - f) + (src[a + 1] || 0) * f; }
   playBuffer(buf);
+  return n / 16000;
+}
+function playRecDiag() { if (recDiag) playPcm(recDiag.pcm); }
+
+/* ---------- 自分の録音を聞き返す（v0.22.0） ----------
+   直近の録音を端末のメモリにだけ置く（Azure には保存しない）。前後の無音は切る。
+   聞き比べ：自分の録音 → 少し間をあけて → お手本 の順に鳴らす */
+let myRec = null;      // シャドーイングの直近の録音 { key: お手本の文, pcm: Int16Array }
+let lastHeard = null;  // 会話などで直近に文字にした録音（Int16Array）
+const keepPcm = (mic) => (mic && mic.peak >= 0.01 && mic.pcm.length ? S.trimSilence(mic.pcm) : null);
+function playMine(pcm, thenSay) {
+  if (!pcm) return;
+  stopAudio();
+  const sec = playPcm([pcm]);
+  if (thenSay && sec) compareTimer = setTimeout(() => { compareTimer = null; say(thenSay, 0.9); }, sec * 1000 + 600);
+}
+const myRecHTML = (key) => (myRec && myRec.key === key && !recording
+  ? `<div class="row"><button class="btn" id="my-play">🎧 自分の声を聞く</button><button class="btn" id="my-compare">🎧→${SPK} 聞き比べ（自分→お手本）</button></div>`
+  : "");
+function bindMyRec(key) {
+  if ($("my-play")) $("my-play").onclick = () => myRec && myRec.key === key && playMine(myRec.pcm);
+  if ($("my-compare")) $("my-compare").onclick = () => myRec && myRec.key === key && playMine(myRec.pcm, key);
 }
 function recDiagHTML() {
   if (!recDiag || recording) return "";
@@ -962,6 +987,7 @@ async function assessOnce(refText, opts = {}) {
     clearTimeout(timer);
     abortRec = null; stopRec = null;
     if (mic) { lastPeak = mic.peak; lastMaxDb = mic.maxDb; lastStats = { ...micStats(mic), ok: !!out }; }
+    if (mic && sCur && refText === sCur.text) { const pcm = keepPcm(mic); if (pcm) myRec = { key: refText, pcm }; } // 単語の練習（2〜4語）の録音では上書きしない
     try { mic && mic.close(); } catch (e) {}
     try { push && push.close(); } catch (e) {}
     try { recognizer && recognizer.close(); } catch (e) {}
@@ -1065,7 +1091,7 @@ async function renderTalk() {
         ${t.shown ? "" : `<button class="linkbtn" data-reveal="${i}">文字を見る</button>`}${t.ja ? `<button class="linkbtn" data-talk-ja="${i}" aria-expanded="${t.jaShown ? "true" : "false"}">${t.jaShown ? "訳を隠す" : "訳を見る"}</button>` : ""}</div>
         ${t.ja && t.jaShown ? `<p class="tr" style="margin:4px 0 0">${esc(t.ja)}</p>` : ""}
         ${t.help ? `<p class="help">💡 ${esc(t.help)}</p>` : ""}</div>`
-    : `<div class="bubble me">${esc(t.text)}</div>`).join("");
+    : `<div class="bubble me">${esc(t.text)}${t.pcm ? `<div class="tools"><button class="iconbtn mine" data-mine="${i}" aria-label="自分の声を聞く">🎧</button></div>` : ""}</div>`).join("");
   v.innerHTML = `<article class="card talk">
     <div class="row between"><span class="chip">${esc(sc.emoji || "")} ${esc(sc.title)}</span><button class="linkbtn" id="talk-quit">やめる</button></div>
     <p class="note" style="margin:0">目的：${esc(sc.goal_ja || "")}</p>
@@ -1091,6 +1117,7 @@ async function renderTalk() {
   if ($("hint-ja")) $("hint-ja").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) talkHint(); };
   $("talk-review").onclick = talkReview;
   v.querySelectorAll("[data-reveal]").forEach((b) => (b.onclick = () => { talk.history[+b.dataset.reveal].shown = true; renderTalk(); }));
+  v.querySelectorAll("[data-mine]").forEach((b) => (b.onclick = () => playMine(talk.history[+b.dataset.mine].pcm)));
   v.querySelectorAll("[data-talk-ja]").forEach((b) => (b.onclick = () => { const t = talk.history[+b.dataset.talkJa]; t.jaShown = !t.jaShown; renderTalk(); }));
   const log = v.querySelector(".talk-log"); if (log && log.lastElementChild) log.lastElementChild.scrollIntoView({ block: "nearest" });
 }
@@ -1209,6 +1236,7 @@ async function listenText(onPhase) {
     clearTimeout(timer);
     abortRec = null; listenStop = null; listenPhase = "";
     if (mic) { lastPeak = mic.peak; lastMaxDb = mic.maxDb; lastStats = micStats(mic); }
+    lastHeard = text ? keepPcm(mic) : null;
     try { mic && mic.close(); } catch (e) {}
     try { push && push.close(); } catch (e) {}
     try { recognizer && recognizer.close(); } catch (e) {}
@@ -1230,7 +1258,8 @@ async function talkListen() {
   if (talk) talk.listening = false;
   if (!talk) return;
   if (!text) { renderTalk(); return; }
-  talk.history.push({ who: "me", text });
+  talk.history.push({ who: "me", text, pcm: lastHeard }); // 録音は端末のメモリだけ（会話の記録には保存しない）
+  lastHeard = null;
   talk.waiting = true; renderTalk();
   try {
     const r = await talkApi({ action: "turn" });

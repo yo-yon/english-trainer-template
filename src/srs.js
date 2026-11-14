@@ -497,6 +497,27 @@
    * noiseDb：静かな部分の音量（下から20%）、speechDb：声の部分の音量（上から5%）、snr：その差、
    * voicedSec：声のある時間（雑音より12dB以上大きい区間）、leadSec／tailSec：声の前後の無音、clipPct：音割れの割合
    */
+  /**
+   * 自分の録音を聞き返すとき用に、前後の無音を切る（v0.22.0）。押して話す方式では、話し始めるまでの待ちが長くなりがちなため。
+   * chunks：Int16Array の配列（16kHz）。20ms ごとの最大振幅が thr（0〜1）を超えた最初と最後の区間の前後に pad 秒を残す。
+   * 声がまったくなければ null
+   */
+  function trimSilence(chunks, rate = 16000, thr = 0.03, pad = 0.25) {
+    const n = (chunks || []).reduce((s, c) => s + c.length, 0);
+    if (!n) return null;
+    const all = new Int16Array(n); let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    const fr = Math.max(1, Math.round(rate * 0.02)), lim = thr * 32768;
+    let first = -1, last = -1;
+    for (let i = 0; i < n; i += fr) {
+      let m = 0; for (let j = i; j < Math.min(n, i + fr); j++) { const a = Math.abs(all[j]); if (a > m) m = a; }
+      if (m >= lim) { if (first < 0) first = i; last = Math.min(n, i + fr); }
+    }
+    if (first < 0) return null;
+    const p = Math.round(pad * rate);
+    return all.slice(Math.max(0, first - p), Math.min(n, last + p));
+  }
+
   function audioProfile(chunks, rate = 16000) {
     const F = Math.round(rate * 0.02);
     const frames = [];
@@ -629,5 +650,5 @@
   /** 書けた割合から復習の評価：100 → good、80以上 → hard、それ未満 → again */
   const dictationGrade = (score) => (score >= 100 ? "good" : score >= 80 ? "hard" : "again");
 
-  return { PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  return { PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });
