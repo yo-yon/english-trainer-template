@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.19.0";
+const APP_VERSION = "0.19.1";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -1106,7 +1106,8 @@ async function talkListen() {
   stopAudio();
   unlockAudio();
   if (!audioCtx) { showBanner("このブラウザでは録音できません。"); return; }
-  talk.listening = true; talk.hint = null; talk.hintOpen = false; renderTalk(); showBanner("");
+  // 「日本語で言いたいこと」の英文は、見ながら話せるように聞き取り中も残す（相手が返事をしたら消す）
+  talk.listening = true; talk.hintOpen = false; renderTalk(); showBanner("");
   const text = await listenText();
   if (talk) talk.listening = false;
   if (!talk) return;
@@ -1117,6 +1118,7 @@ async function talkListen() {
     const r = await talkApi({ action: "turn" });
     if (!talk) return;
     talk.history.push({ who: "ai", text: r.reply, ja: r.reply_ja || "", shown: false, help: r.help_ja || "" });
+    talk.hint = null; // 発言が相手に届いたら、使ったヒントは片付ける
     talk.goalReached = talk.goalReached || !!r.goal_reached;
     talk.ended = !!r.end || myTalkTurns() >= TALK_MAX;
     say(r.reply, 0.9);
