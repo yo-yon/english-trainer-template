@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.20.0";
+const APP_VERSION = "0.20.1";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -305,12 +305,12 @@ function renderStudy() {
       <div class="ex">${esc(S.cloze(w.word, w.example))}</div><div class="tr">${esc(w.translation)}</div>
       <p class="note" style="margin:0">____ に入る英語を、声に出して言いましょう${w.word.includes(" ") ? `（${w.word.split(" ").length}語）` : ""}。</p>
       ${wRev.state === "wrong" ? `<p class="note" role="alert" style="margin:0;color:var(--again)">「${esc(wRev.heard)}」と聞こえました。もう一度言うか、答えを見てください。</p>` : ""}
-      <button class="btn primary ${lis ? "rec" : ""}" id="w-say" ${lis ? "disabled" : ""}>${MIC}${lis ? "聞き取り中…話し終わると自動で止まります" : wRev.state === "wrong" ? "もう一度言う" : "英語で言う"}</button>
+      ${lis ? listenBtn("w-say") : `<button class="btn primary" id="w-say">${MIC}${wRev.state === "wrong" ? "もう一度言う" : "英語で言う"}</button>`}
       ${lis ? `<div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div><p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>` : ""}
       <div class="row"><button class="btn" id="w-giveup" ${lis ? "disabled" : ""}>分からない（答えを見る）</button><button class="linkbtn" id="w-self" ${lis ? "disabled" : ""}>声を出せないので自分で判定</button></div>
     </article>`;
     v.innerHTML = h;
-    $("w-say").onclick = wordListen;
+    $("w-say").onclick = () => (lis ? listenStop && listenStop() : wordListen());
     $("w-giveup").onclick = () => { wGiveUp = true; revealed = true; renderStudy(); say(w.word, 0.9); };
     $("w-self").onclick = () => { wRev = null; revealed = true; renderStudy(); say(w.word, 0.9); };
     return;
@@ -368,7 +368,7 @@ async function wordListen() {
   if (!audioCtx) { showBanner("このブラウザでは録音できません。「声を出せないので自分で判定」で進めてください。"); return; }
   const w = wCur;
   wRev.state = "listening"; renderStudy(); showBanner("");
-  const text = await listenText();
+  const text = await listenText(() => renderStudy());
   if (wCur !== w || !wRev) return;
   if (!text) { wRev.state = "ask"; renderStudy(); return; }
   wRev.heard = text.replace(/[.?!]+$/, "");
@@ -1048,7 +1048,7 @@ async function renderTalk() {
       ${talk.hint.alt ? `<p class="note" style="margin:4px 0 0">別の言い方：${esc(talk.hint.alt)}</p>` : ""}${talk.hint.note ? `<p class="note" style="margin:2px 0 0">${esc(talk.hint.note)}</p>` : ""}<div style="margin-top:4px">${saveBtn(talk.hint.en, talk.hintJa || "", "hint")}</div></div>` : ""}
     ${ended
       ? `<p class="note" style="margin:0">${talk.goalReached ? "🎉 目的を達成しました。" : "会話はここまでです。"}振り返りをしましょう。</p>`
-      : `<button class="btn primary ${talk.listening ? "rec" : ""}" id="talk-rec" ${talk.listening || talk.waiting ? "disabled" : ""}>${MIC}${talk.listening ? "聞き取り中…話し終わると自動で止まります" : talk.waiting ? "相手が考えています…" : "話す"}</button>
+      : `${talk.listening ? listenBtn("talk-rec", "話し終わったら「■ 話し終わった」を押すと相手に届きます") : `<button class="btn primary" id="talk-rec" ${talk.waiting ? "disabled" : ""}>${MIC}${talk.waiting ? "相手が考えています…" : "話す"}</button>`}
         ${talk.listening ? `<div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div><p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>` : ""}
         <div class="row">${talk.hintOpen
           ? `<input id="hint-ja" class="textin" placeholder="言いたいことを日本語で" maxlength="200"><button class="btn" id="hint-go">英語にする</button>`
@@ -1057,7 +1057,7 @@ async function renderTalk() {
   </article>`;
   $("talk-phrases").ontoggle = () => { talk.phrasesOpen = $("talk-phrases").open; };
   $("talk-quit").onclick = () => { if (!talk.listening && (!myTalkTurns() || confirm("会話をやめますか？（振り返りはしません）"))) { stopAudio(); talk = null; renderTalk(); } };
-  if ($("talk-rec")) $("talk-rec").onclick = talkListen;
+  if ($("talk-rec")) $("talk-rec").onclick = () => (talk.listening ? listenStop && listenStop() : talkListen());
   if ($("hint-open")) $("hint-open").onclick = () => { talk.hintOpen = true; renderTalk().then(() => $("hint-ja") && $("hint-ja").focus()); };
   if ($("hint-go")) $("hint-go").onclick = talkHint;
   if ($("hint-ja")) $("hint-ja").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) talkHint(); };
@@ -1132,19 +1132,40 @@ async function talkApi(body) {
 
 /* 録音して文字にする（発音評価なし）。会話と瞬間作文で共用。呼ぶ前に「聞き取り中」の画面（音量メーター）を出しておく。
    聞き取れなかったときは理由をバナーに出して "" を返す */
-async function listenText() {
+/* 押して話す（v0.20.1）：シャドーイングと同じく「■ 話し終わった」で入力を閉じる。
+   入力を閉じると、Azure は無音を待たずにその時点までの音声で結果を返す。
+   考えながら話しても途中で切れないよう、区切りの無音は上限の 5 秒、話し始めるまでの待ちは 15 秒
+   （Speech_SegmentationSilenceTimeoutMs は 100〜5000 ミリ秒。Microsoft Learn「How to recognize speech」で確認） */
+let listenStop = null, listenPhase = "";
+const listenBtn = (id, label) => listenPhase === "text"
+  ? `<button class="btn primary scoring" id="${id}" disabled aria-busy="true"><span class="spin" aria-hidden="true"></span>文字にしています…</button>`
+  : `<button class="btn primary rec" id="${id}">■ 話し終わった</button>
+     <p class="note" style="margin:0">${label || "言い終わったら「■ 話し終わった」を押してください"}（5秒黙ると自動でも止まります）。</p>`;
+async function listenText(onPhase) {
   const SDK = window.SpeechSDK;
-  let recognizer = null, mic = null, push = null, timer = null, text = "";
+  let recognizer = null, mic = null, push = null, timer = null, text = "", stopped = false;
+  listenPhase = "listen";
+  const stop = () => {
+    if (stopped) return; stopped = true;
+    try { mic && mic.close(); } catch (e) {}
+    try { push && push.close(); } catch (e) {}
+    listenPhase = "text"; if (onPhase) onPhase();
+  };
+  listenStop = stop;
   try {
     push = SDK.AudioInputStream.createPushStream(SDK.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
     mic = await openMic((buf) => { try { push.write(buf); } catch (e) {} }, updateMeter);
     abortRec = () => { try { mic.close(); push.close(); } catch (e) {} };
+    if (stopped) { try { mic.close(); } catch (e) {} } // マイクの準備中に止めた
     const tk = await speechToken();
     const cfg = SDK.SpeechConfig.fromAuthorizationToken(tk.token, tk.region);
     cfg.speechRecognitionLanguage = "en-US";
+    cfg.setProperty(SDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, "5000");
+    cfg.setProperty(SDK.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "15000");
     recognizer = new SDK.SpeechRecognizer(cfg, SDK.AudioConfig.fromStreamInput(push));
-    timer = setTimeout(() => { try { mic && mic.close(); push.close(); } catch (e) {} }, 35000);
+    timer = setTimeout(stop, 35000);
     const result = await new Promise((resolve, reject) => recognizer.recognizeOnceAsync(resolve, reject));
+    stop(); // 5 秒の無音で自動的に区切られたときも、ここでマイクを止める
     if (result.reason === SDK.ResultReason.RecognizedSpeech) text = (result.text || "").trim();
     else if (result.reason === SDK.ResultReason.NoMatch) {
       showBanner(mic && mic.maxDb < OK_DB ? `声が小さかったようです（最大 ${mic.maxDb.toFixed(0)}dB）。マイクに近づくか、「マイクの感度」を上げてもう一度話してください。` : "聞き取れませんでした。もう一度話してください。");
@@ -1158,7 +1179,7 @@ async function listenText() {
     else showBanner(/Permission|NotAllowed/i.test(String(e)) ? "マイクの使用を許可してください。" : "聞き取れませんでした。もう一度試してください。");
   } finally {
     clearTimeout(timer);
-    abortRec = null;
+    abortRec = null; listenStop = null; listenPhase = "";
     if (mic) { lastPeak = mic.peak; lastMaxDb = mic.maxDb; lastStats = micStats(mic); }
     try { mic && mic.close(); } catch (e) {}
     try { push && push.close(); } catch (e) {}
@@ -1177,7 +1198,7 @@ async function talkListen() {
   if (!audioCtx) { showBanner("このブラウザでは録音できません。"); return; }
   // 「日本語で言いたいこと」の英文は、見ながら話せるように聞き取り中も残す（相手が返事をしたら消す）
   talk.listening = true; talk.hintOpen = false; renderTalk(); showBanner("");
-  const text = await listenText();
+  const text = await listenText(() => talk && renderTalk());
   if (talk) talk.listening = false;
   if (!talk) return;
   if (!text) { renderTalk(); return; }
@@ -1367,7 +1388,7 @@ function renderCompose() {
       <div class="row"><button class="btn" id="cp-type" style="width:auto;flex:1">⌨ 入力する</button><button class="btn" id="cp-skip" style="width:auto;flex:1">わからない</button></div>
       <div class="row" style="gap:12px">${gainSelectHTML("gain-sel-comp")}</div>`;
   } else if (comp.state === "listening") {
-    h += `<button class="btn primary rec" disabled>${MIC}聞き取り中…話し終わると自動で止まります</button>
+    h += `${listenBtn("cp-stop")}
       <div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div><p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>`;
   } else if (comp.state === "typing") {
     h += `<textarea id="cp-input" class="textin" rows="3" placeholder="英語で入力" maxlength="400" autocapitalize="sentences">${esc(comp.answer)}</textarea>
@@ -1392,6 +1413,7 @@ function renderCompose() {
   h += `</article>`;
   v.innerHTML = h;
   if ($("cp-rec")) $("cp-rec").onclick = composeListen;
+  if ($("cp-stop")) $("cp-stop").onclick = () => listenStop && listenStop();
   if ($("cp-type")) $("cp-type").onclick = () => { comp.state = "typing"; renderCompose(); $("cp-input").focus(); };
   if ($("cp-back")) $("cp-back").onclick = () => { comp.state = "ask"; renderCompose(); };
   if ($("cp-skip")) $("cp-skip").onclick = () => { comp.answer = ""; comp.result = { grade: "wrong", better: "", note: "" }; comp.state = "result"; renderCompose(); say(it.en, 0.9); };
@@ -1406,7 +1428,7 @@ async function composeListen() {
   stopAudio(); unlockAudio();
   if (!audioCtx) { showBanner("このブラウザでは録音できません。入力で答えてください。"); return; }
   comp.state = "listening"; renderCompose(); showBanner("");
-  const text = await listenText();
+  const text = await listenText(() => comp && renderCompose());
   if (!comp) return;
   if (!text) { comp.state = "ask"; renderCompose(); return; }
   composeJudge(text);
