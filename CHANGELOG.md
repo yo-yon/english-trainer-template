@@ -2,6 +2,12 @@
 
 更新の取り込み方は [docs/UPDATING.md](docs/UPDATING.md) を見てください。
 
+## 0.19.1（2026-11-14）
+
+変わったファイル：`src/app.js`
+
+- 会話タブの「💡 日本語で言いたいこと」で作った英文が、「話す」を押すと消えてしまっていたのを修正。聞き取り中も表示したままにし、相手が返事をしたら消します
+
 ## 0.19.0（2026-11-12）
 
 変わったファイル：`src/app.js`、`api/src/functions/index.js`、`api/src/pack.js`（新規）、`api/test/pack.test.js`・`api/test/fixtures/pack-sample.json`（新規）、`SETUP.md`
