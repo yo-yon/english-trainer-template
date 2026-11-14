@@ -444,3 +444,13 @@ test("例文の訳の4択：言い回しだけ違う似た訳は重ねない", (
     assert.ok(!r.some((x) => x.id === "w1"));
   }
 });
+
+test("自分の録音の前後の無音を切る：声の前後に少しだけ余白を残す。声がなければ null", () => {
+  const rate = 16000, pcm = new Int16Array(rate * 3); // 3秒：1.0〜1.5秒だけ声
+  for (let i = rate; i < rate * 1.5; i++) pcm[i] = i % 2 ? 8000 : -8000;
+  const out = S.trimSilence([pcm.subarray(0, rate), pcm.subarray(rate)], rate);
+  const sec = out.length / rate;
+  assert.ok(sec > 0.9 && sec < 1.1, String(sec)); // 0.5秒＋前後0.25秒ずつ
+  assert.equal(S.trimSilence([new Int16Array(rate)], rate), null);
+  assert.equal(S.trimSilence([], rate), null);
+});

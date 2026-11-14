@@ -175,6 +175,8 @@ summary.scene-group{cursor:pointer}
 .bubble .veil{filter:blur(6px);user-select:none}
 .bubble .tools{display:flex;gap:6px;align-items:center;margin-top:6px}
 .bubble .tools .iconbtn{width:32px;height:32px}
+.bubble.me .tools{justify-content:flex-end}
+.bubble.me .iconbtn.mine{color:inherit;border-color:currentColor;font-size:15px}
 .bubble .help{margin:6px 0 0;font-size:13px;color:var(--muted)}
 .hintbox{border:1px dashed var(--accent);border-radius:12px;padding:10px 12px}
 .textin{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;font-size:15px;background:var(--surface);color:var(--ink)}
