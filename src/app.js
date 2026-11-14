@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.19.1";
+const APP_VERSION = "0.20.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -11,7 +11,7 @@ const MIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
 /* ---------- 状態 ---------- */
 let data = { words: [], sentences: [], phrases: [], cards: { word: {}, sentence: {}, compose: {}, dict: {} }, settings: {} };
 let loaded = false;
-const defaults = { newPerDay: 10, newSentencesPerDay: 5, composePerDay: 5, dictPerDay: 3, newLog: { date: "", count: 0 }, newSentLog: { date: "", count: 0 }, composeLog: { date: "", count: 0 }, dictLog: { date: "", count: 0 }, quiz: { total: 0, correct: 0 }, hideText: false, strictness: "strict" };
+const defaults = { newPerDay: 5, newSentencesPerDay: 5, composePerDay: 5, dictPerDay: 3, newLog: { date: "", count: 0 }, newSentLog: { date: "", count: 0 }, composeLog: { date: "", count: 0 }, dictLog: { date: "", count: 0 }, quiz: { total: 0, correct: 0 }, hideText: false, strictness: "strict" };
 const st = () => data.settings;
 const TALK_GOAL = 1; // 1日の会話の目安（回）。上の「会話」の数は今日の残り
 
@@ -247,10 +247,26 @@ async function say(text, rate) {
 const fmtNext = (d) => (d === 0 ? "このあと" : d === 1 ? "明日" : d < 30 ? d + "日後" : Math.round(d / 30) + "か月後");
 
 /* ================= 単語（間隔反復） ================= */
-let wQueue = [], wCur = null, revealed = false, wDone = 0;
+let wQueue = [], wCur = null, revealed = false, wDone = 0, wHeld = 0;
+/* 1枚の単語の出し方（v0.20.0）
+   mc ：英語 → 意味を4択で選んでから答えを見る（間違えたら「もう一度」）
+   rev：一度覚えた単語は逆向き。日本語の意味と例文の穴埋めを見て、英語を声で言う（Speech で判定）
+   wPick：4択で選んだもの、wRev：声で答える状態 { state: ask|listening|wrong, heard } */
+let wMode = "mc", wChoices = null, wPick = null, wRev = null, wGiveUp = false;
+function setWordCur(w) {
+  wCur = w || null; revealed = false; wPick = null; wGiveUp = false;
+  if (!wCur) return;
+  const card = data.cards.word[wCur.id];
+  wRev = S.isReverse(card) && S.cloze(wCur.word, wCur.example) ? { state: "ask", heard: "" } : null;
+  wMode = wRev ? "rev" : "mc";
+  wChoices = wMode === "mc" ? S.meaningChoices(wCur, data.words) : null;
+}
 function buildWordQueue() {
-  wQueue = S.buildQueue(data.words, data.cards.word, st().newLog, st().newPerDay, "category", "tech", "general");
-  wCur = wQueue.shift() || null; revealed = false;
+  const q = S.buildQueue(data.words, data.cards.word, st().newLog, st().newPerDay, "category", "tech", "general");
+  // 復習待ちが多い日は、新しい単語を止めて復習を先に終わらせる
+  const c = S.capNew(q, data.cards.word);
+  wQueue = c.queue; wHeld = c.held;
+  setWordCur(wQueue.shift());
 }
 function counts() {
   const all = [wCur, ...wQueue].filter(Boolean);
@@ -276,20 +292,50 @@ function renderStudy() {
   counts();
   if (!loaded) { v.innerHTML = emptyCard("読み込んでいます", "単語と学習記録を取得しています。"); return; }
   if (!data.words.length) { v.innerHTML = emptyCard("まだ単語がありません", "「一覧」タブの「データ管理」→「初期データを取り込む」から、単語と文を入れてください。"); return; }
-  if (!wCur) { v.innerHTML = emptyCard("今日の単語は終わりです", (wDone ? wDone + "枚を学習しました。" : "") + "次はシャドーイングに進みましょう。"); return; }
+  if (!wCur) { v.innerHTML = emptyCard("今日の単語は終わりです", (wDone ? wDone + "枚を学習しました。" : "") + (wHeld ? `復習がたまっているので、今日の新しい単語（${wHeld}語）はお休みにしました。` : "") + "次はシャドーイングに進みましょう。"); return; }
   const w = wCur, s = data.cards.word[w.id];
+  const rev = wMode === "rev";
   let h = `<article class="card" aria-live="polite">
-    <div class="row between"><span class="chip">${s ? "復習" : "新しい単語"} · ${w.category === "general" ? "一般" : "技術"}</span><span class="note">${esc(w.pos || "")}</span></div>
-    <p class="word">${esc(w.word)}</p>
+    <div class="row between"><span class="chip">${rev ? "英語で言う" : s ? "復習" : "新しい単語"} · ${w.category === "general" ? "一般" : "技術"}</span><span class="note">${esc(w.pos || "")}</span></div>
+`;
+  if (rev && !revealed) {
+    // 逆向き：答え（英単語）は見せず、音も鳴らさない
+    const lis = wRev.state === "listening";
+    h += `<p class="word-ja">${esc(w.meaning)}</p>
+      <div class="ex">${esc(S.cloze(w.word, w.example))}</div><div class="tr">${esc(w.translation)}</div>
+      <p class="note" style="margin:0">____ に入る英語を、声に出して言いましょう${w.word.includes(" ") ? `（${w.word.split(" ").length}語）` : ""}。</p>
+      ${wRev.state === "wrong" ? `<p class="note" role="alert" style="margin:0;color:var(--again)">「${esc(wRev.heard)}」と聞こえました。もう一度言うか、答えを見てください。</p>` : ""}
+      <button class="btn primary ${lis ? "rec" : ""}" id="w-say" ${lis ? "disabled" : ""}>${MIC}${lis ? "聞き取り中…話し終わると自動で止まります" : wRev.state === "wrong" ? "もう一度言う" : "英語で言う"}</button>
+      ${lis ? `<div class="meter" role="img" aria-label="マイクの音量。縦線を超えれば十分です"><i id="mic-level"></i></div><p class="note" id="mic-label" style="margin:-8px 0 0">マイクを準備しています…</p>` : ""}
+      <div class="row"><button class="btn" id="w-giveup" ${lis ? "disabled" : ""}>分からない（答えを見る）</button><button class="linkbtn" id="w-self" ${lis ? "disabled" : ""}>声を出せないので自分で判定</button></div>
+    </article>`;
+    v.innerHTML = h;
+    $("w-say").onclick = wordListen;
+    $("w-giveup").onclick = () => { wGiveUp = true; revealed = true; renderStudy(); say(w.word, 0.9); };
+    $("w-self").onclick = () => { wRev = null; revealed = true; renderStudy(); say(w.word, 0.9); };
+    return;
+  }
+  h += `<p class="word">${esc(w.word)}</p>
     <div class="row">
       <button class="btn" data-say="${esc(w.word)}">${SPK}発音を聞く</button>
       <button class="btn" data-say="${esc(w.word)}" data-rate="0.55">${SLOW}ゆっくり</button>
     </div>`;
   if (!revealed) {
-    h += `<p class="note">意味と類義語を思い出し、発音をまねてから答えを見ましょう。</p>
-      <button class="btn primary" id="reveal">答えを見る</button></article>`;
+    if (wChoices) {
+      h += `<p class="note" style="margin:0">意味を選んでください。</p>
+        <div class="opts">${wChoices.map((c, i) => `<button class="opt" data-mc="${i}" style="font-family:inherit;font-size:15px">${esc(c.meaning)}</button>`).join("")}</div>
+        <button class="linkbtn" id="reveal">分からない（答えを見る）</button></article>`;
+    } else {
+      h += `<p class="note">意味と類義語を思い出し、発音をまねてから答えを見ましょう。</p>
+        <button class="btn primary" id="reveal">答えを見る</button></article>`;
+    }
   } else {
-    h += `<div class="row between"><div class="ipa">${esc(w.ipa)}</div><button class="fbbtn" data-fb="word" aria-label="この単語の内容を報告">👎 おかしい</button></div>
+    // 4択で間違えた・分からなかった・声で言えなかった → 「もう一度」だけ
+    const missed = wGiveUp || (wPick && !wPick.ok);
+    const said = rev && wRev && wRev.state === "ok";
+    h += `${wPick ? `<div class="opts">${wChoices.map((c) => `<div class="opt ${c.id === w.id ? "ok" : c.id === wPick.id ? "ng" : ""}" style="font-family:inherit;font-size:15px;cursor:default">${c.id === w.id ? "✓ " : c.id === wPick.id ? "✕ " : ""}${esc(c.meaning)}</div>`).join("")}</div>` : ""}
+      ${said ? `<p class="note" style="margin:0;color:var(--good)">✓ 言えました（「${esc(wRev.heard)}」）</p>` : ""}
+      <div class="row between"><div class="ipa">${esc(w.ipa)}</div><button class="fbbtn" data-fb="word" aria-label="この単語の内容を報告">👎 おかしい</button></div>
       <div class="stress" aria-label="強勢: ${esc(w.stress)}">${stressHTML(w.stress)}</div>
       ${w.stressNote ? `<p class="note" style="margin:-8px 0 0">${esc(w.stressNote)}</p>` : ""}
       <dl>
@@ -299,12 +345,35 @@ function renderStudy() {
           <div class="row" style="margin-top:6px"><button class="btn" data-say="${esc(w.example)}">${SPK}例文</button></div></dd>
       </dl>
       ${w.tip ? `<div class="tip"><strong>発音のコツ</strong>${esc(w.tip)}</div>` : ""}
-      <div class="grades">${[["again", "もう一度"], ["hard", "難しい"], ["good", "覚えた"], ["easy", "簡単"]].map(([g, l]) =>
-        `<button class="g-${g}" data-grade="${g}"><span class="lbl">${l}</span><span class="nx">${fmtNext(S.nextState(s, g).interval)}</span></button>`).join("")}</div>
+      ${missed
+        ? `<p class="note" style="margin:0">${wGiveUp ? "答えを確かめて、" : "正しい意味を確かめて、"}発音をまねてから次へ進みましょう。少しあとにもう一度出します。</p>
+          <div class="grades" style="grid-template-columns:1fr"><button class="g-again" data-grade="again"><span class="lbl">次へ（もう一度）</span><span class="nx">${fmtNext(S.nextState(s, "again").interval)}</span></button></div>`
+        : `<div class="grades">${[["again", "もう一度"], ["hard", "難しい"], ["good", "覚えた"], ["easy", "簡単"]].map(([g, l]) =>
+          `<button class="g-${g}" data-grade="${g}"><span class="lbl">${l}</span><span class="nx">${fmtNext(S.nextState(s, g).interval)}</span></button>`).join("")}</div>`}
     </article>`;
   }
   v.innerHTML = h;
-  const r = $("reveal"); if (r) r.onclick = () => { revealed = true; renderStudy(); };
+  const r = $("reveal"); if (r) r.onclick = () => { if (wChoices) wGiveUp = true; revealed = true; renderStudy(); };
+  v.querySelectorAll("[data-mc]").forEach((b) => (b.onclick = () => {
+    const c = wChoices[+b.dataset.mc];
+    wPick = { id: c.id, ok: c.id === w.id };
+    revealed = true; renderStudy(); say(w.word, 0.9);
+  }));
+}
+/* 逆向きの単語：英語を声で言って、合っているか判定する（発音の点数は付けない） */
+async function wordListen() {
+  if (!wCur || !wRev || micBusy()) return;
+  if (!window.SpeechSDK) { showBanner("音声認識の部品を読み込めていません。「声を出せないので自分で判定」で進めてください。"); return; }
+  stopAudio(); unlockAudio();
+  if (!audioCtx) { showBanner("このブラウザでは録音できません。「声を出せないので自分で判定」で進めてください。"); return; }
+  const w = wCur;
+  wRev.state = "listening"; renderStudy(); showBanner("");
+  const text = await listenText();
+  if (wCur !== w || !wRev) return;
+  if (!text) { wRev.state = "ask"; renderStudy(); return; }
+  wRev.heard = text.replace(/[.?!]+$/, "");
+  if (S.matchSpoken(w.word, text)) { wRev.state = "ok"; revealed = true; renderStudy(); say(w.word, 0.9); }
+  else { wRev.state = "wrong"; renderStudy(); }
 }
 function gradeWord(g) {
   const w = wCur; if (!w) return;
@@ -316,7 +385,7 @@ function gradeWord(g) {
   // その場で出し直すのは1回だけ（2回目の「もう一度」は明日に回す）
   if (g === "again" && !wRetried.has(w.id)) { wRetried.add(w.id); wQueue.splice(Math.min(3, wQueue.length), 0, w); }
   wDone++;
-  wCur = wQueue.shift() || null; revealed = false;
+  setWordCur(wQueue.shift());
   renderStudy();
 }
 
@@ -919,7 +988,7 @@ function nextSentence() {
    場面を選ぶ → 相手（AI）の最初の一言 → 「話す」で返事 → 相手の返事（読み上げ） … → 振り返り
    相手の発言は、最初は文字を隠す（聞き取り重視）。録音はシャドーイングと同じ仕組み（音量メーター・感度） */
 let scenes = null, talk = null, seedScenes = null;
-const micBusy = () => recording || !!(talk && talk.listening) || !!(comp && comp.state === "listening");
+const micBusy = () => recording || !!(wRev && wRev.state === "listening") || !!(talk && talk.listening) || !!(comp && comp.state === "listening");
 async function loadScenes() {
   if (scenes) return scenes;
   if (!seedScenes) { try { seedScenes = await (await fetch("/seed/scenes.json", { cache: "no-store" })).json(); } catch (e) { seedScenes = []; } }
@@ -1967,6 +2036,11 @@ async function load() {
   data.cards.compose = data.cards.compose || {}; data.cards.dict = data.cards.dict || {};
   data.sentences = [...(d.sentences || []), ...data.phrases.map(phraseToSentence)];
   data.settings = { ...defaults, ...(d.settings || {}) };
+  // v0.20.0：新しい単語の初期値を10語から5語に。以前の初期値のままの人だけ一度だけ直す（自分で変えた人はそのまま）
+  if (!st().wordPlan) {
+    if (st().newPerDay === 10) { st().newPerDay = 5; showBanner("単語の覚え方を変えました：新しい単語は1日5語に（一覧タブで変えられます）。意味は4択で答え、一度覚えた単語は日本語から英語を言う練習になります。"); }
+    st().wordPlan = 2; saveSettings();
+  }
   if (!st().instanceId) { // 将来、匿名でフィードバックを集めるときに使うランダムなID（個人情報とは結び付かない）
     st().instanceId = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now());
     saveSettings();

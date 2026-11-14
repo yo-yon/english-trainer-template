@@ -362,3 +362,57 @@ test("wordDrill は口の形と、聞こえた音に応じた直し方を返す"
   const fb = S.pronFeedback({ pron: 70, flu: 90, words: [{ w: "red", acc: 50, err: "Mispronunciation", ph: [["ɹ", 30], ["ɛ", 90], ["d", 90]] }] });
   assert.ok(fb.hints.find((h) => h.ph === "ɹ").guide);
 });
+
+/* ---------- 単語の学習のしかた（v0.20.0） ---------- */
+test("復習待ちが20を超えた日は新しい単語を止める", () => {
+  const cards = {}; const q = [];
+  for (let i = 0; i < 21; i++) { cards["r" + i] = { due: 0 }; q.push({ id: "r" + i }); }
+  q.push({ id: "n1" }, { id: "n2" });
+  const r = S.capNew(q, cards);
+  assert.equal(r.queue.length, 21); assert.equal(r.held, 2);
+  const few = S.capNew(q.slice(15), cards);
+  assert.equal(few.held, 0); assert.equal(few.queue.length, 8);
+});
+
+test("逆向きは一度「覚えた」側に進んだ単語だけ（もう一度で戻る）", () => {
+  assert.equal(S.isReverse(undefined), false);
+  const once = S.nextState(undefined, "good");
+  assert.equal(S.isReverse(once), true);
+  assert.equal(S.isReverse(S.nextState(once, "again")), false);
+});
+
+test("例文の穴埋め：活用形・句・語尾の e と y", () => {
+  assert.equal(S.cloze("follow up", "I'll follow up with you by email."), "I'll ____ with you by email.");
+  assert.equal(S.cloze("rollout", "The rollouts start today."), "The ____ start today.");
+  assert.equal(S.cloze("scale", "We are scaling fast."), "We are ____ fast.");
+  assert.equal(S.cloze("apply", "It applies to all users."), "It ____ to all users.");
+  assert.equal(S.cloze("tenant", "No match here."), null);
+});
+
+test("意味の4択：正解を含む4つ、同じ意味を重ねない、足りなければ null", () => {
+  const words = [
+    { id: "a", word: "a", meaning: "取り込み", category: "tech" },
+    { id: "b", word: "b", meaning: "制限", category: "tech" },
+    { id: "c", word: "c", meaning: "取り込み（データの）", category: "tech" },
+    { id: "d", word: "d", meaning: "連絡する", category: "general" },
+    { id: "e", word: "e", meaning: "見直す", category: "general" },
+  ];
+  const r = S.meaningChoices(words[0], words);
+  assert.equal(r.length, 4);
+  assert.ok(r.some((x) => x.id === "a"));
+  assert.ok(!r.some((x) => x.id === "c")); // 括弧を除くと同じ意味
+  assert.equal(S.meaningChoices(words[0], words.slice(0, 3)), null);
+});
+
+test("声の答え：活用形と小さな聞き違いは合格、違う語は不合格", () => {
+  assert.equal(S.matchSpoken("follow up", "Follow up."), true);
+  assert.equal(S.matchSpoken("follow up", "I'll follow up with you."), true);
+  assert.equal(S.matchSpoken("rollout", "rollouts"), true);
+  assert.equal(S.matchSpoken("scale", "Scaling."), true);
+  assert.equal(S.matchSpoken("governance", "governence"), true);
+  assert.equal(S.matchSpoken("in-depth", "in depth"), true);
+  assert.equal(S.matchSpoken("governance", "government"), false);
+  assert.equal(S.matchSpoken("data", "that"), false);
+  assert.equal(S.matchSpoken("follow up", "follow"), false);
+  assert.equal(S.matchSpoken("tenant", ""), false);
+});

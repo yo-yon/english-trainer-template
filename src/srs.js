@@ -64,6 +64,70 @@
     return [...due, ...fresh];
   }
 
+  /* ---------- 単語の学習のしかた（v0.20.0） ---------- */
+  const PAUSE_NEW_AT = 20; // 復習待ちがこれを超えた日は、新しい単語を出さない
+
+  /** 復習待ちが多い日は新しい単語を止める。held は止めた新しい単語の数 */
+  function capNew(queue, cards, limit = PAUSE_NEW_AT) {
+    const due = queue.filter((x) => cards[x.id]);
+    if (due.length <= limit) return { queue, held: 0 };
+    return { queue: due, held: queue.length - due.length };
+  }
+
+  /** 一度「覚えた」側に進んだ単語は、逆向き（日本語と例文の穴埋めから英語を言う）で出す */
+  const isReverse = (card) => !!(card && card.reps >= 1);
+
+  const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  /** 例文の中の単語を ____ にする（活用形も含む）。見つからなければ null */
+  function cloze(word, example) {
+    const parts = String(word || "").trim().split(/\s+/);
+    if (!parts[0] || !example) return null;
+    // scale → scaling、apply → applies のように語尾が変わる形も拾う
+    const head = parts[0].length >= 4 && /[ey]$/i.test(parts[0]) ? escRe(parts[0].slice(0, -1)) : escRe(parts[0]);
+    const re = new RegExp("\\b" + head + "\\w*" + (parts.length > 1 ? "\\s+" + parts.slice(1).map(escRe).join("\\s+") : "") + "\\b", "i");
+    if (!re.test(example)) return null;
+    return example.replace(re, "____");
+  }
+
+  /** 意味の4択：同じ種類（技術・一般）の単語の意味を優先して、ほかの3つを選ぶ。同じ意味は重ねない */
+  function meaningChoices(word, words, n = 4, rand = Math.random) {
+    const norm = (m) => String(m || "").replace(/[（(].*?[)）]/g, "").replace(/\s+/g, "").trim();
+    const seen = new Set([norm(word.meaning)]);
+    const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    const others = words.filter((w) => w.id !== word.id && w.meaning);
+    const pool = [...shuffle(others.filter((w) => w.category === word.category)), ...shuffle(others.filter((w) => w.category !== word.category))];
+    const picks = [];
+    for (const w of pool) {
+      if (picks.length >= n - 1) break;
+      const k = norm(w.meaning);
+      if (!k || seen.has(k)) continue;
+      seen.add(k); picks.push({ id: w.id, meaning: w.meaning });
+    }
+    if (picks.length < n - 1) return null; // 単語が少なくて4択が作れない
+    return shuffle([{ id: word.id, meaning: word.meaning }, ...picks]);
+  }
+
+  /** 声で答えた英語が、目当ての単語（句）と合っているか。活用形（-s・-ed・-ing など）と小さな聞き違いは許す */
+  function matchSpoken(target, heard) {
+    const toks = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9' -]/g, " ").replace(/-/g, " ").split(/\s+/).filter(Boolean);
+    const want = toks(target), got = toks(heard);
+    if (!want.length || !got.length) return false;
+    const dist = (a, b) => {
+      const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+      for (let j = 1; j <= b.length; j++) d[0][j] = j;
+      for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      return d[a.length][b.length];
+    };
+    const same = (w, g) => {
+      if (w === g) return true;
+      if (w.length >= 4 && g.startsWith(w) && g.length - w.length <= 3) return true; // rollouts・deployed・scaling
+      if (w.length >= 4 && /[ey]$/.test(w) && g.startsWith(w.slice(0, -1)) && g.length - w.length <= 3) return true; // scale → scaling、apply → applies
+      return w.length >= 5 && dist(w, g) <= 1;
+    };
+    for (let i = 0; i + want.length <= got.length; i++) if (want.every((w, k) => same(w, got[i + k]))) return true;
+    return false;
+  }
+
   /**
    * 採点の厳しさ。Azure の総合点（PronScore）は文全体の平均なので、1〜2語の崩れが目立たない。
    * そこで、単語ごとの点数で減点した「判定点」を使い、単語の色分けの基準も上げる。
@@ -541,5 +605,5 @@
   /** 書けた割合から復習の評価：100 → good、80以上 → hard、それ未満 → again */
   const dictationGrade = (score) => (score >= 100 ? "good" : score >= 80 ? "hard" : "again");
 
-  return { DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  return { PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });
