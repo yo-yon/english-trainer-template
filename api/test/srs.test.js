@@ -416,3 +416,31 @@ test("声の答え：活用形と小さな聞き違いは合格、違う語は�
   assert.equal(S.matchSpoken("follow up", "follow"), false);
   assert.equal(S.matchSpoken("tenant", ""), false);
 });
+
+test("単語の出し方：新しい単語は英語を見て4択、覚えた単語は聞く・言う・例文を聞くを順に回す", () => {
+  const w = { id: "a", word: "rollout", example: "The rollout starts next week.", translation: "展開は来週始まります。" };
+  const at = (reps) => S.wordMode({ reps }, w);
+  assert.equal(S.wordMode(undefined, w), "mc");
+  assert.equal(at(0), "mc");
+  assert.deepEqual([1, 2, 3, 4, 5].map(at), ["listen", "rev", "listen-ex", "rev", "listen"]);
+  // 穴埋めが作れない → 言う代わりに聞く。例文がない → 例文の代わりに単語を聞く
+  const noEx = { id: "b", word: "quota" };
+  assert.deepEqual([1, 2, 3].map((reps) => S.wordMode({ reps }, noEx)), ["listen", "listen", "listen"]);
+});
+
+test("例文の訳の4択：正解の訳を含む4つ、例文がなければ null", () => {
+  const words = ["a", "b", "c", "d"].map((id, i) => ({ id, word: id, example: `Example ${id}.`, translation: `例文${i}。`, category: "tech" }));
+  const r = S.exampleChoices(words[0], words);
+  assert.equal(r.length, 4);
+  assert.ok(r.some((x) => x.id === "a" && x.meaning === "例文0。"));
+  assert.equal(S.exampleChoices({ id: "z", word: "z", translation: "訳" }, words), null);
+});
+
+test("例文の訳の4択：言い回しだけ違う似た訳は重ねない", () => {
+  const t = ["この設定をオンにできるのはテナント管理者だけです。", "この設定を変えられるのは、テナントの管理者だけです。", "会議は来週の火曜日に移りました。", "データを移したら速くなりました。", "新しい機能は来月から使えます。"];
+  const words = t.map((tr, i) => ({ id: "w" + i, word: "w" + i, example: "Ex.", translation: tr, category: "tech" }));
+  for (let k = 0; k < 20; k++) {
+    const r = S.exampleChoices(words[0], words);
+    assert.ok(!r.some((x) => x.id === "w1"));
+  }
+});

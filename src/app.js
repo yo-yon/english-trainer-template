@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.20.1";
+const APP_VERSION = "0.21.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -248,19 +248,26 @@ const fmtNext = (d) => (d === 0 ? "このあと" : d === 1 ? "明日" : d < 30 ?
 
 /* ================= 単語（間隔反復） ================= */
 let wQueue = [], wCur = null, revealed = false, wDone = 0, wHeld = 0;
-/* 1枚の単語の出し方（v0.20.0）
-   mc ：英語 → 意味を4択で選んでから答えを見る（間違えたら「もう一度」）
-   rev：一度覚えた単語は逆向き。日本語の意味と例文の穴埋めを見て、英語を声で言う（Speech で判定）
+/* 1枚の単語の出し方（v0.20.0、v0.21.0 で「聞いて意味を選ぶ」を追加。決め方は srs.js の wordMode）
+   mc       ：英語 → 意味を4択で選んでから答えを見る（間違えたら「もう一度」）
+   rev      ：一度覚えた単語は逆向き。日本語の意味と例文の穴埋めを見て、英語を声で言う（Speech で判定）
+   listen   ：文字を見せずに単語の音だけを聞いて、意味を4択
+   listen-ex：文字を見せずに例文の音だけを聞いて、例文の意味を4択
    wPick：4択で選んだもの、wRev：声で答える状態 { state: ask|listening|wrong, heard } */
 let wMode = "mc", wChoices = null, wPick = null, wRev = null, wGiveUp = false;
+const isListen = () => wMode === "listen" || wMode === "listen-ex";
+const cueText = () => (wCur ? (wMode === "listen-ex" ? wCur.example : wCur.word) : "");
 function setWordCur(w) {
-  wCur = w || null; revealed = false; wPick = null; wGiveUp = false;
+  wCur = w || null; revealed = false; wPick = null; wGiveUp = false; wRev = null;
   if (!wCur) return;
-  const card = data.cards.word[wCur.id];
-  wRev = S.isReverse(card) && S.cloze(wCur.word, wCur.example) ? { state: "ask", heard: "" } : null;
-  wMode = wRev ? "rev" : "mc";
-  wChoices = wMode === "mc" ? S.meaningChoices(wCur, data.words) : null;
+  wMode = S.wordMode(data.cards.word[wCur.id], wCur);
+  if (wMode === "rev") wRev = { state: "ask", heard: "" };
+  wChoices = wMode === "listen-ex" ? S.exampleChoices(wCur, data.words) : wMode === "rev" ? null : S.meaningChoices(wCur, data.words);
+  // 4択が作れないとき（単語が少ない）は、今までどおり英語を見て答えを見る形にする
+  if (isListen() && !wChoices) { wMode = "mc"; wChoices = S.meaningChoices(wCur, data.words); }
 }
+/* 聞いて意味を選ぶ形のときは、出したらすぐに音を鳴らす（ボタンを押した直後なので自動再生が許される） */
+function playListenCue() { if (wCur && isListen() && !revealed) say(cueText(), 0.9); }
 function buildWordQueue() {
   const q = S.buildQueue(data.words, data.cards.word, st().newLog, st().newPerDay, "category", "tech", "general");
   // 復習待ちが多い日は、新しい単語を止めて復習を先に終わらせる
@@ -296,7 +303,7 @@ function renderStudy() {
   const w = wCur, s = data.cards.word[w.id];
   const rev = wMode === "rev";
   let h = `<article class="card" aria-live="polite">
-    <div class="row between"><span class="chip">${rev ? "英語で言う" : s ? "復習" : "新しい単語"} · ${w.category === "general" ? "一般" : "技術"}</span><span class="note">${esc(w.pos || "")}</span></div>
+    <div class="row between"><span class="chip">${rev ? "英語で言う" : wMode === "listen" ? "聞いて意味を選ぶ" : wMode === "listen-ex" ? "例文を聞いて意味を選ぶ" : s ? "復習" : "新しい単語"} · ${w.category === "general" ? "一般" : "技術"}</span><span class="note">${esc(w.pos || "")}</span></div>
 `;
   if (rev && !revealed) {
     // 逆向き：答え（英単語）は見せず、音も鳴らさない
@@ -313,6 +320,22 @@ function renderStudy() {
     $("w-say").onclick = () => (lis ? listenStop && listenStop() : wordListen());
     $("w-giveup").onclick = () => { wGiveUp = true; revealed = true; renderStudy(); say(w.word, 0.9); };
     $("w-self").onclick = () => { wRev = null; revealed = true; renderStudy(); say(w.word, 0.9); };
+    return;
+  }
+  if (isListen() && !revealed) {
+    // 聞いて意味を選ぶ：英語の文字は見せない
+    const ex = wMode === "listen-ex", cue = cueText();
+    h += `<p class="note" style="margin:0">${ex ? "例文を聞いて、文の意味を選んでください。" : "音だけを聞いて、意味を選んでください。"}文字は答えのあとに出ます。</p>
+      <div class="row">
+        <button class="btn primary" data-say="${esc(cue)}">${SPK}聞く</button>
+        <button class="btn" data-say="${esc(cue)}" data-rate="0.6">${SLOW}ゆっくり</button>
+      </div>
+      <div class="opts">${wChoices.map((c, i) => `<button class="opt" data-mc="${i}" style="font-family:inherit;font-size:15px">${esc(c.meaning)}</button>`).join("")}</div>
+      <div class="row"><button class="linkbtn" id="reveal">分からない（答えを見る）</button><button class="linkbtn" id="w-noaudio">音を出せないので文字で答える</button></div>
+    </article>`;
+    v.innerHTML = h;
+    bindWordChoices(v, w);
+    $("w-noaudio").onclick = () => { wMode = "mc"; wChoices = S.meaningChoices(w, data.words); renderStudy(); };
     return;
   }
   h += `<p class="word">${esc(w.word)}</p>
@@ -353,7 +376,11 @@ function renderStudy() {
     </article>`;
   }
   v.innerHTML = h;
-  const r = $("reveal"); if (r) r.onclick = () => { if (wChoices) wGiveUp = true; revealed = true; renderStudy(); };
+  bindWordChoices(v, w);
+}
+/* 4択と「分からない」のボタン（英語を見て選ぶ・聞いて選ぶで共通） */
+function bindWordChoices(v, w) {
+  const r = $("reveal"); if (r) r.onclick = () => { if (wChoices) wGiveUp = true; revealed = true; renderStudy(); say(w.word, 0.9); };
   v.querySelectorAll("[data-mc]").forEach((b) => (b.onclick = () => {
     const c = wChoices[+b.dataset.mc];
     wPick = { id: c.id, ok: c.id === w.id };
@@ -387,6 +414,7 @@ function gradeWord(g) {
   wDone++;
   setWordCur(wQueue.shift());
   renderStudy();
+  playListenCue();
 }
 
 /* ================= シャドーイング＋発音評価 ================= */
@@ -2062,6 +2090,11 @@ async function load() {
   if (!st().wordPlan) {
     if (st().newPerDay === 10) { st().newPerDay = 5; showBanner("単語の覚え方を変えました：新しい単語は1日5語に（一覧タブで変えられます）。意味は4択で答え、一度覚えた単語は日本語から英語を言う練習になります。"); }
     st().wordPlan = 2; saveSettings();
+  }
+  // v0.21.0：覚えた単語の復習に「聞いて意味を選ぶ」を混ぜる。一度だけお知らせする
+  if (st().wordPlan < 3) {
+    if (Object.keys(data.cards.word || {}).length) showBanner("覚えた単語の復習に「聞いて意味を選ぶ」練習を足しました。文字を見ずに単語や例文を聞いて、意味を4択で選びます。");
+    st().wordPlan = 3; saveSettings();
   }
   if (!st().instanceId) { // 将来、匿名でフィードバックを集めるときに使うランダムなID（個人情報とは結び付かない）
     st().instanceId = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now());
