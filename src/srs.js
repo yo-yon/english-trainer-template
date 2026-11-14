@@ -498,6 +498,46 @@
    * voicedSec：声のある時間（雑音より12dB以上大きい区間）、leadSec／tailSec：声の前後の無音、clipPct：音割れの割合
    */
   /**
+   * 会話の道具（v0.23.0）：聞き取れなかったときに聞き返す・確かめる・考える時間を作る・話をつなぐ・相づち・締める表現。
+   * 全部聞き取れなくても会話を止めずに続けるため。m は使えたかを調べる正規表現（小文字・記号を除いた発言に当てる）
+   */
+  const TOOL_KINDS = { clarify: "聞き返す", confirm: "確かめる", stall: "考える時間を作る", connect: "話をつなぐ", react: "相づち", close: "締める" };
+  const CONV_TOOLS = [
+    { id: "t01", kind: "clarify", en: "Sorry, could you say that again?", ja: "すみません、もう一度言ってもらえますか？", m: "say (that|it) again|repeat (that|it)|pardon|come again" },
+    { id: "t02", kind: "clarify", en: "Could you speak a little more slowly?", ja: "もう少しゆっくり話してもらえますか？", m: "more slowly|slow down|speak slowly" },
+    { id: "t03", kind: "clarify", en: "What do you mean by that?", ja: "それはどういう意味ですか？", m: "what do you mean|what did you mean" },
+    { id: "t04", kind: "clarify", en: "Sorry, what does that word mean?", ja: "すみません、その単語はどういう意味ですか？", m: "what does .{0,30}mean|what is the meaning" },
+    { id: "t05", kind: "clarify", en: "Could you put that another way?", ja: "別の言い方で言ってもらえますか？", m: "another way|in other words|simpler words|more simply" },
+    { id: "t06", kind: "clarify", en: "Sorry, I didn't catch that.", ja: "すみません、聞き取れませんでした。", m: "didn'?t catch|did not catch|didn'?t hear|did not hear|missed that" },
+    { id: "t07", kind: "confirm", en: "So you mean ...?", ja: "つまり〜ということですか？", m: "(^|, )(so )?you mean|are you saying" },
+    { id: "t08", kind: "confirm", en: "Just to make sure, ...", ja: "念のため確認ですが、〜", m: "just to make sure|just to confirm|let me confirm|let me check" },
+    { id: "t09", kind: "confirm", en: "Did you say ...?", ja: "〜と言いましたか？", m: "did you say" },
+    { id: "t10", kind: "stall", en: "Let me think.", ja: "ちょっと考えさせてください。", m: "let me think|let me see" },
+    { id: "t11", kind: "stall", en: "That's a good question.", ja: "いい質問ですね。", m: "good question" },
+    { id: "t12", kind: "stall", en: "How can I put it ...", ja: "なんて言えばいいかな…", m: "how can i put|how should i put|how do i say|how can i say" },
+    { id: "t13", kind: "stall", en: "Well, ...", ja: "ええと、〜", m: "(^|, )well," },
+    { id: "t14", kind: "connect", en: "By the way, ...", ja: "ところで、〜", m: "by the way" },
+    { id: "t15", kind: "connect", en: "Actually, ...", ja: "実は、〜", m: "\\bactually\\b" },
+    { id: "t16", kind: "connect", en: "Speaking of ..., ", ja: "〜と言えば、", m: "speaking of" },
+    { id: "t17", kind: "connect", en: "That reminds me, ...", ja: "それで思い出したんですが、〜", m: "that reminds me" },
+    { id: "t18", kind: "connect", en: "What about you?", ja: "あなたはどうですか？", m: "what about you|how about you|and you(,|$)" },
+    { id: "t19", kind: "react", en: "That makes sense.", ja: "なるほど、分かります。", m: "makes sense" },
+    { id: "t20", kind: "react", en: "Oh, really?", ja: "えっ、本当ですか？", m: "(^|, )(oh,? )?really(,|$)" },
+    { id: "t21", kind: "react", en: "I see.", ja: "なるほど。", m: "(^|, )(oh,? )?i see( now)?(,|$)" },
+    { id: "t22", kind: "react", en: "That sounds great.", ja: "それはいいですね。", m: "sounds (great|good|interesting|nice|fun)" },
+    { id: "t23", kind: "close", en: "It was nice talking to you.", ja: "お話しできてよかったです。", m: "nice (talking|to talk|meeting|to meet|chatting)" },
+    { id: "t24", kind: "close", en: "Let's keep in touch.", ja: "これからも連絡を取り合いましょう。", m: "keep in touch|stay in touch" },
+    { id: "t25", kind: "close", en: "I should get going.", ja: "そろそろ行かないと。", m: "get going|have to go|should go|need to go" },
+  ];
+  /** 学習者の発言（配列）で使えた会話の道具を、CONV_TOOLS の順で返す */
+  function toolsUsed(texts) {
+    const lines = (texts || []).map((t) => String(t || "").toLowerCase().replace(/[.?!;:]+/g, ",").replace(/[^a-z' ,]/g, " ").replace(/\s*,[\s,]*/g, ", ").replace(/[, ]+$/, "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    return CONV_TOOLS.filter((t) => { const re = new RegExp(t.m); return lines.some((l) => re.test(l)); });
+  }
+  /** 聞き返し・確かめの表現を使ったか（発言1つ） */
+  const isClarify = (text) => toolsUsed([text]).some((t) => t.kind === "clarify" || t.kind === "confirm");
+
+  /**
    * 自分の録音を聞き返すとき用に、前後の無音を切る（v0.22.0）。押して話す方式では、話し始めるまでの待ちが長くなりがちなため。
    * chunks：Int16Array の配列（16kHz）。20ms ごとの最大振幅が thr（0〜1）を超えた最初と最後の区間の前後に pad 秒を残す。
    * 声がまったくなければ null
@@ -650,5 +690,5 @@
   /** 書けた割合から復習の評価：100 → good、80以上 → hard、それ未満 → again */
   const dictationGrade = (score) => (score >= 100 ? "good" : score >= 80 ? "hard" : "again");
 
-  return { PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  return { PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });
