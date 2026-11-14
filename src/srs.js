@@ -89,22 +89,46 @@
     return example.replace(re, "____");
   }
 
-  /** 意味の4択：同じ種類（技術・一般）の単語の意味を優先して、ほかの3つを選ぶ。同じ意味は重ねない */
-  function meaningChoices(word, words, n = 4, rand = Math.random) {
-    const norm = (m) => String(m || "").replace(/[（(].*?[)）]/g, "").replace(/\s+/g, "").trim();
-    const seen = new Set([norm(word.meaning)]);
+  /** 4択を作る共通部分。field（meaning・translation）の値を選択肢にする。同じ種類（技術・一般）の単語を優先し、同じ値は重ねない */
+  function choicesBy(field, word, words, n, rand) {
+    const norm = (m) => String(m || "").replace(/[（(].*?[)）]/g, "").replace(/[\s。、，,.!?！？]/g, "").trim();
+    if (!word[field]) return null;
+    const seen = new Set([norm(word[field])]);
     const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-    const others = words.filter((w) => w.id !== word.id && w.meaning);
+    const others = words.filter((w) => w.id !== word.id && w[field]);
     const pool = [...shuffle(others.filter((w) => w.category === word.category)), ...shuffle(others.filter((w) => w.category !== word.category))];
+    // 文の訳は言い回しだけ違う似た文が多いので、文字の並び（2文字ずつ）が半分以上重なるものも重ねない
+    const grams = (t) => { const g = new Set(); for (let i = 0; i < t.length - 1; i++) g.add(t.slice(i, i + 2)); return g; };
+    const near = (x, y) => { const A = grams(x), B = grams(y); if (A.size < 6 || B.size < 6) return false; let c = 0; for (const g of A) if (B.has(g)) c++; return c / (A.size + B.size - c) >= 0.5; };
     const picks = [];
     for (const w of pool) {
       if (picks.length >= n - 1) break;
-      const k = norm(w.meaning);
+      const k = norm(w[field]);
       if (!k || seen.has(k)) continue;
-      seen.add(k); picks.push({ id: w.id, meaning: w.meaning });
+      if (field === "translation" && [...seen].some((x) => near(x, k))) continue;
+      seen.add(k); picks.push({ id: w.id, meaning: w[field] });
     }
     if (picks.length < n - 1) return null; // 単語が少なくて4択が作れない
-    return shuffle([{ id: word.id, meaning: word.meaning }, ...picks]);
+    return shuffle([{ id: word.id, meaning: word[field] }, ...picks]);
+  }
+  /** 意味の4択（選択肢は { id, meaning }） */
+  const meaningChoices = (word, words, n = 4, rand = Math.random) => choicesBy("meaning", word, words, n, rand);
+  /** 例文の訳の4択（例文を聞いて意味を選ぶとき。選択肢の形は意味の4択と同じ { id, meaning }） */
+  const exampleChoices = (word, words, n = 4, rand = Math.random) => (word.example ? choicesBy("translation", word, words, n, rand) : null);
+
+  /**
+   * 単語の出し方（v0.21.0）。聞いた瞬間に意味が浮かぶようにするため、文字を見ずに聞いて意味を選ぶ形を混ぜる。
+   *   mc        ：新しい単語・「もう一度」の後（reps 0）。英語を見て意味を4択
+   *   listen    ：音だけを聞いて単語の意味を4択（reps 1, 5, 9 …）
+   *   rev       ：日本語と例文の穴埋めから英語を声で言う（reps 2, 4, 6 …）。穴埋めが作れなければ listen
+   *   listen-ex ：例文を音だけで聞いて、例文の意味を4択（reps 3, 7, 11 …）。例文か訳がなければ listen
+   */
+  function wordMode(card, word) {
+    if (!isReverse(card)) return "mc";
+    const k = card.reps % 4;
+    if (k === 0 || k === 2) return cloze(word.word, word.example) ? "rev" : "listen";
+    if (k === 3 && word.example && word.translation) return "listen-ex";
+    return "listen";
   }
 
   /** 声で答えた英語が、目当ての単語（句）と合っているか。活用形（-s・-ed・-ing など）と小さな聞き違いは許す */
@@ -605,5 +629,5 @@
   /** 書けた割合から復習の評価：100 → good、80以上 → hard、それ未満 → again */
   const dictationGrade = (score) => (score >= 100 ? "good" : score >= 80 ? "hard" : "again");
 
-  return { PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  return { PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });
