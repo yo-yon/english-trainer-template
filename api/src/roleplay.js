@@ -38,8 +38,13 @@ const CONTEXT =
   "The learner is a Japanese IT engineer at an intermediate English level (around CEFR B1) who travels abroad for international tech conferences and wants to handle everyday conversations too. " +
   "The learner's messages come from speech recognition, so they may contain recognition errors; interpret them charitably.";
 
-/** 会話の続き（相手役の返事）を作るメッセージ */
-function turnMessages(scene, history) {
+/** 聞き返しのきっかけ（v0.23.0）：1回の会話で1度だけ、クライアントが選んだ返事で、少し聞き取りにくい言い方をする */
+const CHALLENGE =
+  "For this reply only: naturally use one less common word, idiom, or phrasal verb that a B1 learner may not know (still at most 30 words), " +
+  "so the learner gets a chance to ask what you mean. Do not explain it unless the learner asks.\n";
+
+/** 会話の続き（相手役の返事）を作るメッセージ。challenge：聞き返しのきっかけを作る返事にする */
+function turnMessages(scene, history, challenge = false) {
   return [
     {
       role: "system",
@@ -54,6 +59,8 @@ function turnMessages(scene, history) {
         "- Reply in 1 or 2 short, natural spoken sentences (at most 30 words) with simple, common vocabulary.\n" +
         "- Keep the conversation going toward the learner's goal, usually by asking one follow-up question.\n" +
         "- Do not correct the learner's grammar during the conversation.\n" +
+        "- If the learner asks you to repeat, slow down, or explain a word, do it kindly with simpler words first, then continue the conversation.\n" +
+        (challenge ? CHALLENGE : "") +
         "- If the learner's last message is hard to understand or they seem stuck, set help_ja to a short hint in Japanese (at most 60 characters) about what they could say next. Otherwise set help_ja to null.\n" +
         "- Set goal_reached to true only when the learner has clearly achieved the goal.\n" +
         "- Set reply_ja to a natural Japanese translation of your reply (shown only when the learner asks for it).\n" +
@@ -154,7 +161,7 @@ function prepare(b) {
   if (b.action === "turn") {
     if (!history.length || history[history.length - 1].who !== "me") return { error: "history" };
     if (myTurns(history) > MAX_TURNS) return { error: "too_long" };
-    return { scene, history, messages: turnMessages(scene, history), maxTokens: 700 /* 訳（reply_ja）の分を足した上限 */, clean: (o) => cleanTurn(o, history) };
+    return { scene, history, messages: turnMessages(scene, history, b.challenge === true), maxTokens: 700 /* 訳（reply_ja）の分を足した上限 */, clean: (o) => cleanTurn(o, history) };
   }
   if (b.action === "review") {
     if (!myTurns(history)) return { error: "history" };

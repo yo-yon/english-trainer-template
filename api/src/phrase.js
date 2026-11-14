@@ -4,7 +4,7 @@ const MAX_PHRASES = 500;
 const clip = (s, n) => String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n);
 const hasJa = (s) => /[぀-ヿ一-鿿]/.test(s);
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
-const FROM = ["review", "correction", "scene", "hint"];
+const FROM = ["review", "correction", "scene", "hint", "tools"];
 
 /** 保存のリクエストを検査し、保存する形にする。不正なら { error } */
 function cleanPhrase(b, now = Date.now()) {

@@ -83,3 +83,13 @@ test("使ってみたい表現があれば、学習者が使える機会を作�
   assert.match(sys, /do not say them yourself/);
   assert.doesNotMatch(R.prepare({ action: "turn", scene, history: H("Hi", "Hello") }).messages[0].content, /practicing these expressions/);
 });
+
+test("聞き返しのきっかけ：challenge のときだけ指示を足す。聞き返されたら言い直す指示は毎回入る", () => {
+  const h = H("Hi! Anything I can help with?", "Yes, I have a question.");
+  const plain = R.prepare({ action: "turn", scene, history: h }).messages[0].content;
+  const ch = R.prepare({ action: "turn", scene, history: h, challenge: true }).messages[0].content;
+  assert.match(plain, /If the learner asks you to repeat/);
+  assert.doesNotMatch(plain, /less common word/);
+  assert.match(ch, /less common word/);
+  assert.doesNotMatch(R.prepare({ action: "turn", scene, history: h, challenge: "yes" }).messages[0].content, /less common word/);
+});

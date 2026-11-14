@@ -454,3 +454,13 @@ test("自分の録音の前後の無音を切る：声の前後に少しだけ�
   assert.equal(S.trimSilence([new Int16Array(rate)], rate), null);
   assert.equal(S.trimSilence([], rate), null);
 });
+
+test("会話の道具：使えた表現を拾う。似た語の別の使い方は拾わない", () => {
+  const ids = (a) => S.toolsUsed(a).map((t) => t.id);
+  assert.deepEqual(ids(["Sorry, could you say that again?", "Well, let me think. Actually I work in IT.", "Oh really? That makes sense.", "It was nice talking to you."]), ["t01", "t10", "t13", "t15", "t19", "t20", "t23"]);
+  assert.deepEqual(ids(["I see the hotel.", "I really like it.", "Well done."]), []);
+  assert.equal(S.isClarify("What do you mean by onboarding?"), true);
+  assert.equal(S.isClarify("Just to make sure, the session starts at ten?"), true);
+  assert.equal(S.isClarify("That sounds great."), false);
+  assert.ok(S.CONV_TOOLS.every((t) => S.TOOL_KINDS[t.kind] && t.en && t.ja));
+});

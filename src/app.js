@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.22.0";
+const APP_VERSION = "0.23.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -1070,11 +1070,13 @@ async function renderTalk() {
     const isNew = list.filter((sc) => sc.added === today);
     const recent = list.filter((sc) => sc.added && sc.added < today && sc.added >= weekAgo).sort((a, b) => (b.added > a.added ? 1 : -1));
     const groups = [...new Set(list.map((sc) => sc.group || "その他"))];
-    setTimeout(() => { const pb = $("phrasebook"); if (pb) pb.ontoggle = () => (pbOpen = pb.open); });
+    setTimeout(() => { const pb = $("phrasebook"); if (pb) pb.ontoggle = () => (pbOpen = pb.open); const tb = $("toolbook"); if (tb) tb.ontoggle = () => (tbOpen = tb.open); });
     v.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
       <article class="card" style="gap:8px"><h2 style="margin:0;font-size:18px">場面を選んで会話する</h2>
         <p class="note" style="margin:0">1日1回・10分ほどが目安です（今日 ${talkCountToday()} 回）。場面は毎日1つ増え、同じ場面でも毎回少し展開が変わります。相手の発言は最初は文字を隠しています。</p></article>
       ${phrasebookHTML()}
+      <details class="card phrasebook" id="toolbook" ${tbOpen ? "open" : ""}><summary><b>🧰 会話の道具</b> <span class="note">聞き取れないとき・言葉に詰まったときの表現</span></summary>
+        <p class="note" style="margin:8px 0 0">全部聞き取れなくても、聞き返したり確かめたりすれば会話は続けられます。「＋保存」でフレーズ帳に入り、シャドーイングで練習できます。</p>${toolsListHTML()}</details>
       ${isNew.length ? `<h3 class="scene-group">🆕 今日の新しい場面</h3><div class="scene-list">${isNew.map(btn).join("")}</div>` : ""}
       ${recent.length ? `<h3 class="scene-group">最近の場面</h3><div class="scene-list">${recent.map(btn).join("")}</div>` : ""}
       ${groups.map((g) => { const items = list.filter((sc) => (sc.group || "その他") === g).sort((a, b) => ((b.added || "") > (a.added || "") ? 1 : -1));
@@ -1096,6 +1098,7 @@ async function renderTalk() {
     <div class="row between"><span class="chip">${esc(sc.emoji || "")} ${esc(sc.title)}</span><button class="linkbtn" id="talk-quit">やめる</button></div>
     <p class="note" style="margin:0">目的：${esc(sc.goal_ja || "")}</p>
     ${talk.targets.length ? `<p class="note targets" style="margin:0">使ってみたい表現：${talk.targets.map((t) => `<b>${esc(t)}</b>${talk.spaced.includes(t) ? '<span class="note">（復習）</span>' : ""}`).join(" / ")}</p>` : ""}
+    <details id="talk-tools" ${talk.toolsOpen ? "open" : ""}><summary class="note">🧰 聞き返し・つなぎの表現</summary><div style="margin-top:6px">${toolsListHTML()}</div></details>
     <details id="talk-phrases" ${talk.phrasesOpen ? "open" : ""}><summary class="note">使えるフレーズ</summary><div class="list" style="margin-top:6px">${(sc.phrases || []).map((p) => `<div class="li"><button class="iconbtn" data-say="${esc(p.en)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="s">${esc(p.en)}</div><div class="m">${esc(p.ja)}</div></div>${saveBtn(p.en, p.ja, "scene")}</div>`).join("")}</div></details>
     <div class="talk-log" aria-live="polite">${bubbles}${talk.waiting ? '<div class="bubble ai note">…</div>' : ""}</div>
     ${talk.hint ? `<div class="hintbox"><div class="row between"><b>${esc(talk.hint.en)}</b><button class="iconbtn" data-say="${esc(talk.hint.en)}" aria-label="読み上げ">${SPK}</button></div>
@@ -1110,6 +1113,7 @@ async function renderTalk() {
     <button class="btn ${ended ? "primary" : ""}" id="talk-review" ${myTalkTurns() && !talk.waiting && !talk.listening ? "" : "disabled"}>終わって振り返る</button>
   </article>`;
   $("talk-phrases").ontoggle = () => { talk.phrasesOpen = $("talk-phrases").open; };
+  $("talk-tools").ontoggle = () => { talk.toolsOpen = $("talk-tools").open; };
   $("talk-quit").onclick = () => { if (!talk.listening && (!myTalkTurns() || confirm("会話をやめますか？（振り返りはしません）"))) { stopAudio(); talk = null; renderTalk(); } };
   if ($("talk-rec")) $("talk-rec").onclick = () => (talk.listening ? listenStop && listenStop() : talkListen());
   if ($("hint-open")) $("hint-open").onclick = () => { talk.hintOpen = true; renderTalk().then(() => $("hint-ja") && $("hint-ja").focus()); };
@@ -1122,6 +1126,22 @@ async function renderTalk() {
   const log = v.querySelector(".talk-log"); if (log && log.lastElementChild) log.lastElementChild.scrollIntoView({ block: "nearest" });
 }
 
+/* 振り返り：使えた会話の道具と、聞き返しのきっかけに聞き返せたか（AI を使わず、発言の文字から調べる） */
+function toolsReviewHTML() {
+  const mine = talk.history.filter((t) => t.who === "me").map((t) => t.text);
+  const used = S.toolsUsed(mine);
+  const ci = talk.history.findIndex((t) => t.who === "ai" && t.challenge);
+  const next = ci >= 0 ? talk.history.slice(ci + 1).find((t) => t.who === "me") : null;
+  let ch = "";
+  if (ci >= 0 && next) {
+    ch = S.isClarify(next.text)
+      ? `<p class="note" style="margin:6px 0 0;color:var(--good)">✓ 相手が少し難しい言い方をした場面で、聞き返せました。</p>`
+      : `<p class="note" style="margin:6px 0 0">相手が少し難しい言い方をした場面がありました：「${esc(talk.history[ci].text)}」<br>分からないときは「What do you mean by ...?」や「Sorry, could you say that again?」と聞き返して大丈夫です。</p>`;
+  }
+  return `<div><b class="note">🧰 会話の道具</b>${used.length
+    ? `<div class="row" style="margin-top:4px">${used.map((t) => `<span class="chip used">✓ ${esc(t.en)}</span>`).join("")}</div>`
+    : `<p class="note" style="margin:4px 0 0">今回は使いませんでした。会話の画面の「🧰 聞き返し・つなぎの表現」から1つ選んで、次の会話で使ってみましょう。</p>`}${ch}</div>`;
+}
 function renderTalkReview(v) {
   const r = talk.review, sc = talk.scene;
   v.innerHTML = `<article class="card talk">
@@ -1129,6 +1149,7 @@ function renderTalkReview(v) {
     ${r.summary_ja ? `<p style="margin:0">${esc(r.summary_ja)}</p>` : ""}
     ${(r.targets || []).length ? `<div><b class="note">使ってみたい表現</b><div class="row" style="margin-top:4px">${r.targets.map((t) => `<span class="chip ${(r.targets_used || []).includes(t) ? "used" : ""}">${(r.targets_used || []).includes(t) ? "✓" : "–"} ${esc(t)}</span>`).join("")}</div>
       ${(r.wordUpdates || []).length ? `<p class="note" style="margin:6px 0 0">単語帳に反映：${r.wordUpdates.map((u) => `${esc(u.word)} → ${u.used ? "使えたので次回を " + u.when + " に" : "次回を " + u.when + " に前倒し"}`).join("、")}</p>` : ""}</div>` : ""}
+    ${toolsReviewHTML()}
     ${r.good.length ? `<div><b class="note">よかった点</b><ul class="rv">${r.good.map((g) => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}
     ${r.corrections.length ? `<div><b class="note">もっと自然な言い方</b><div class="list" style="margin-top:6px">${r.corrections.map((c) => `<div class="li"><div class="grow"><div class="m">あなた：${esc(c.you)}</div><div class="s">→ ${esc(c.better)}</div>${c.note ? `<div class="m">${esc(c.note)}</div>` : ""}</div><button class="iconbtn" data-say="${esc(c.better)}" aria-label="読み上げ">${SPK}</button>${saveBtn(c.better, c.ja || "", "correction", c.you)}</div>`).join("")}</div></div>` : ""}
     ${r.phrases.length ? `<div><b class="note">覚えたいフレーズ</b><div class="list" style="margin-top:6px">${r.phrases.map((p) => `<div class="li"><button class="iconbtn" data-say="${esc(p.en)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="s">${esc(p.en)}</div><div class="m">${esc(p.ja)}</div></div>${saveBtn(p.en, p.ja, "review")}</div>`).join("")}</div>
@@ -1170,7 +1191,9 @@ function startTalk(id) {
   stopAudio(); showBanner("");
   const pick = (a) => (a && a.length ? a[Math.floor(Math.random() * a.length)] : "");
   const tg = talkTargets(sc);
-  talk = { scene: sc, targets: tg.targets, spaced: tg.spaced, twist: pick(sc.twists), persona: pick(PERSONAS), history: [{ who: "ai", text: sc.opener, ja: sc.opener_ja || "", shown: false }], listening: false, waiting: false, ended: false, goalReached: false, hint: null, hintOpen: false, review: null };
+  talk = { scene: sc, targets: tg.targets, spaced: tg.spaced, twist: pick(sc.twists), persona: pick(PERSONAS), history: [{ who: "ai", text: sc.opener, ja: sc.opener_ja || "", shown: false }], listening: false, waiting: false, ended: false, goalReached: false, hint: null, hintOpen: false, review: null,
+    // 聞き返しのきっかけ：学習者の2〜4回目の発言への返事で1回だけ、少し難しい言い方をしてもらう
+    challengeAt: 2 + Math.floor(Math.random() * 3) };
   renderTalk();
   say(sc.opener, 0.9);
 }
@@ -1262,9 +1285,10 @@ async function talkListen() {
   lastHeard = null;
   talk.waiting = true; renderTalk();
   try {
-    const r = await talkApi({ action: "turn" });
+    const challenge = myTalkTurns() === talk.challengeAt;
+    const r = await talkApi({ action: "turn", ...(challenge ? { challenge: true } : {}) });
     if (!talk) return;
-    talk.history.push({ who: "ai", text: r.reply, ja: r.reply_ja || "", shown: false, help: r.help_ja || "" });
+    talk.history.push({ who: "ai", text: r.reply, ja: r.reply_ja || "", shown: false, help: r.help_ja || "", ...(challenge ? { challenge: true } : {}) });
     talk.hint = null; // 発言が相手に届いたら、使ったヒントは片付ける
     talk.goalReached = talk.goalReached || !!r.goal_reached;
     talk.ended = !!r.end || myTalkTurns() >= TALK_MAX;
@@ -1304,7 +1328,7 @@ async function talkReview() {
 /* ================= フレーズ帳（Phase 2b） =================
    会話の振り返り（覚えたいフレーズ・言い換え）、場面の「使えるフレーズ」、日本語ヒントから保存する。
    保存した表現はシャドーイングの会話文として出題する（間隔反復と発音評価をそのまま使う） */
-let pbOpen = false; // フレーズ帳の開閉（描き直しても保つ）
+let pbOpen = false, tbOpen = false; // フレーズ帳・会話の道具の開閉（描き直しても保つ）
 const normEn = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 function phraseToSentence(p) {
   return { id: p.id, text: p.text, ja: p.ja || "", before: p.before || "", scene: p.scene || "フレーズ帳", category: "conversation", focus: [], source: "フレーズ帳", order: -1, phrase: true };
@@ -1330,16 +1354,25 @@ async function ensureJa(s) {
   jaPending.delete(s.id);
   if (sCur === s) renderShadow();
 }
-function saveBtn(en, ja, from, before = "") {
+function saveBtn(en, ja, from, before = "", scene = "") {
   if (!en) return "";
   return isSaved(en)
     ? `<span class="note saved">✓ 保存済み</span>`
-    : `<button class="linkbtn save-ph" data-phrase="${esc(en)}" data-ja="${esc(ja || "")}" data-before="${esc(before)}" data-from="${from}">＋保存</button>`;
+    : `<button class="linkbtn save-ph" data-phrase="${esc(en)}" data-ja="${esc(ja || "")}" data-before="${esc(before)}" data-from="${from}"${scene ? ` data-scene="${esc(scene)}"` : ""}>＋保存</button>`;
+}
+/* 会話の道具（v0.23.0）：聞き返す・確かめる・考える時間を作る・つなぐ・相づち・締める。
+   「…」を含む表現（So you mean ...? など）は型なので、保存せず読み上げだけにする */
+const TOOLS_SCENE = "会話の道具";
+function toolsListHTML() {
+  return Object.entries(S.TOOL_KINDS).map(([k, label]) => `<h3 class="scene-group">${esc(label)}</h3><div class="list">${S.CONV_TOOLS.filter((t) => t.kind === k).map((t) => {
+    const say = t.en.replace(/\s*\.\.\.\s*/g, " ").replace(/\s+([?,.])/g, "$1").trim();
+    return `<div class="li"><button class="iconbtn" data-say="${esc(say)}" aria-label="読み上げ">${SPK}</button><div class="grow"><div class="s">${esc(t.en)}</div><div class="m">${esc(t.ja)}</div></div>${t.en.includes("...") ? "" : saveBtn(t.en, t.ja, "tools", "", TOOLS_SCENE)}</div>`;
+  }).join("")}</div>`).join("");
 }
 async function savePhrase(btn) {
   btn.disabled = true;
   try {
-    const sc = talk && talk.scene;
+    const sc = btn.dataset.scene ? { title: btn.dataset.scene, id: "tools" } : talk && talk.scene;
     const r = await api("phrase", { method: "POST", body: JSON.stringify({ text: btn.dataset.phrase, ja: btn.dataset.ja, before: btn.dataset.before || "", from: btn.dataset.from, scene: sc ? sc.title : "", sceneId: sc ? sc.id : "" }) });
     if (r && r.item && !data.phrases.some((p) => p.id === r.item.id)) {
       data.phrases.push(r.item);
