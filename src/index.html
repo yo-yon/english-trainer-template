@@ -30,7 +30,8 @@
   </header>
 
   <nav role="tablist">
-    <button role="tab" id="tab-study" aria-selected="true">単語</button>
+    <button role="tab" id="tab-today" aria-selected="true">今日</button>
+    <button role="tab" id="tab-study" aria-selected="false">単語</button>
     <button role="tab" id="tab-shadow" aria-selected="false">シャドーイング</button>
     <button role="tab" id="tab-talk" aria-selected="false">会話</button>
     <button role="tab" id="tab-quiz" aria-selected="false">練習</button>
@@ -40,7 +41,8 @@
   <div id="update" class="banner update" role="status" hidden><span id="update-text"></span> <button class="btn" id="update-btn">更新する</button></div>
   <div id="banner" class="banner" hidden></div>
 
-  <section id="view-study"></section>
+  <section id="view-today"></section>
+  <section id="view-study" hidden></section>
   <section id="view-shadow" hidden></section>
   <section id="view-talk" hidden></section>
   <section id="view-quiz" hidden></section>
