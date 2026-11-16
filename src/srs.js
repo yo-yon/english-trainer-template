@@ -690,5 +690,75 @@
   /** 書けた割合から復習の評価：100 → good、80以上 → hard、それ未満 → again */
   const dictationGrade = (score) => (score >= 100 ? "good" : score >= 80 ? "hard" : "again");
 
-  return { PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  /* ---------- 続ける仕組み（v0.24.0）：今日のリング・連続日数・お休み券 ----------
+     日付はすべて端末の時刻（日本時間）の "YYYY-MM-DD" 文字列で扱う（テストで時差に左右されないよう、計算は UTC の暦で行う） */
+  const addDays = (d, n) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+  /** その日の週の月曜 "YYYY-MM-DD" */
+  const weekOf = (d) => addDays(d, -((new Date(d + "T00:00:00Z").getUTCDay() + 6) % 7));
+  const HABIT_KEEP = 62; // 日ごとの記録を残す日数（記録タブの月カレンダー2か月分）。古い日は anchor にまとめる
+  /**
+   * 今日のリング。day：{ w 単語の回答数, s 文の数, t 会話の回数 }、left：{ w 単語の残り, s 文の残り }
+   * 残りが0なら満タン（その日に出す分がない日も含む）。会話は1日 talkGoal 回で満タン
+   */
+  function habitRings(day, left, talkGoal = 1) {
+    const d = day || {}, l = left || {};
+    const ring = (done, rest) => ({ done, total: done + rest, p: rest <= 0 ? 1 : done / (done + rest) });
+    return { w: ring(d.w || 0, Math.max(0, l.w || 0)), s: ring(d.s || 0, Math.max(0, l.s || 0)), t: { done: d.t || 0, total: talkGoal, p: Math.min(1, (d.t || 0) / talkGoal) } };
+  }
+  /** 今日を1日分として数えるか：3つが満タン、または5分だけモードで単語が満タン。何もしていない日は数えない */
+  function habitCounts(day, rings) {
+    const d = day || {};
+    if (!((d.w || 0) + (d.s || 0) + (d.t || 0))) return false;
+    if (d.f && rings.w.p >= 1) return true;
+    return rings.w.p >= 1 && rings.s.p >= 1 && rings.t.p >= 1;
+  }
+  /**
+   * 連続日数を数える。habit：{ days: { "YYYY-MM-DD": { c: 1(数えた日), ... } }, anchor: { date, run, best, restWeek } }
+   * 昨日までを古い順に見て、数えた日は +1。数えなかった日は、その週（月曜始まり）のお休み券が残っていれば使い（連続は切れず、増えもしない）、
+   * なければ 0 に戻す。連続が 0 のときはお休み券を使わない。今日は数えた日なら +1（まだなら「今日を終えると +1」）
+   * 返り値：{ current, run(昨日まで), best, todayDone, freezeLeft, states: { 日付: "done"|"rest"|"miss" } }
+   */
+  function habitScan(habit, today) {
+    const h = habit || {}, days = h.days || {}, a = h.anchor || null;
+    const keys = Object.keys(days).filter((k) => k < today).sort();
+    let run = a ? a.run || 0 : 0, best = a ? a.best || 0 : 0, restWeek = a ? a.restWeek || "" : "";
+    const states = {};
+    let d = a ? addDays(a.date, 1) : keys[0];
+    const end = addDays(today, -1);
+    for (; d && d <= end; d = addDays(d, 1)) {
+      if (days[d] && days[d].c) { run++; states[d] = "done"; }
+      else if (run > 0 && restWeek !== weekOf(d)) { restWeek = weekOf(d); states[d] = "rest"; }
+      else { run = 0; states[d] = "miss"; }
+      best = Math.max(best, run);
+    }
+    const todayDone = !!(days[today] && days[today].c);
+    const current = run + (todayDone ? 1 : 0);
+    best = Math.max(best, current, h.best || 0);
+    return { current, run, best, todayDone, freezeLeft: restWeek === weekOf(today) ? 0 : 1, states, restWeek };
+  }
+  /** 直近7日（今日まで）の点：done・rest・miss・today（今日まだ）・none（記録を始める前） */
+  function habitWeek(habit, today, scan) {
+    const sc = scan || habitScan(habit, today);
+    const first = (habit && habit.anchor && habit.anchor.date) || Object.keys((habit && habit.days) || {}).sort()[0] || today;
+    const out = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = addDays(today, -i);
+      const state = d === today ? (sc.todayDone ? "done" : "today") : d < first ? "none" : sc.states[d] || "miss";
+      out.push({ date: d, dow: "日月火水木金土"[new Date(d + "T00:00:00Z").getUTCDay()], state });
+    }
+    return out;
+  }
+  /** HABIT_KEEP 日より古い日を anchor（その日までの連続・最長・お休み券を使った週）にまとめて消す。settings の大きさを抑えるため */
+  function habitFold(habit, today, keep = HABIT_KEEP) {
+    const h = habit || {}; h.days = h.days || {};
+    const cut = addDays(today, -keep);
+    const old = Object.keys(h.days).filter((k) => k <= cut);
+    if (!old.length) return h;
+    const sc = habitScan(h, addDays(cut, 1)); // cut の日までを数えた状態
+    h.anchor = { date: cut, run: sc.run, best: sc.best, restWeek: sc.restWeek };
+    for (const k of old) delete h.days[k];
+    return h;
+  }
+
+  return { addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });

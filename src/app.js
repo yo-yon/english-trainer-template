@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.23.0";
+const APP_VERSION = "0.24.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -414,6 +414,7 @@ function gradeWord(g) {
   if (g === "again" && !wRetried.has(w.id)) { wRetried.add(w.id); wQueue.splice(Math.min(3, wQueue.length), 0, w); }
   wDone++;
   setWordCur(wQueue.shift());
+  habitTick("w", wasNew ? "n" : "");
   renderStudy();
   playListenCue();
 }
@@ -1016,6 +1017,7 @@ async function startAssessment() {
 
 function nextSentence() {
   const s = sCur; if (!s) return;
+  const graded = sBest != null;
   if (sBest != null) {
     const prev = data.cards.sentence[s.id];
     const wasNew = !prev;
@@ -1035,6 +1037,7 @@ function nextSentence() {
   }
   sCur = sQueue.shift() || null; sBest = null; sBestNg = 0; sResult = null; openWord = -1;
   sRecall = { id: null, state: "ask" }; // 出し直しのときも、もう一度思い出すところから
+  if (graded) habitTick("s");
   renderShadow();
 }
 
@@ -1321,6 +1324,7 @@ async function talkReview() {
     const today = S.ymd();
     if (!st().talkLog || st().talkLog.date !== today) st().talkLog = { date: today, count: 0 };
     st().talkLog.count++; saveSettings();
+    habitTick("t");
   } catch (e) {}
   finally { if (talk) { talk.waiting = false; renderTalk(); } }
 }
@@ -2098,9 +2102,10 @@ function maybeAskShareAgain() {
 }
 
 /* ---------- タブとクリック ---------- */
-const TABS = ["study", "shadow", "talk", "quiz", "list"];
+const TABS = ["today", "study", "shadow", "talk", "quiz", "list"];
 function tab(which) {
   for (const t of TABS) { $("tab-" + t).setAttribute("aria-selected", which === t); $("view-" + t).hidden = which !== t; }
+  if (which === "today") { if (/^今日の分を終えました/.test($("banner").textContent)) showBanner(""); renderToday(); }
   if (which === "list") renderList();
   if (which === "quiz" && sounds) renderSounds();
   else if (which === "quiz" && dict) renderDict();
@@ -2122,6 +2127,8 @@ document.addEventListener("click", (e) => {
   const pw = e.target.closest("[data-pw]"); if (pw) { openWord = +pw.dataset.pw; drill = null; renderShadow(); return; }
   const lm = e.target.closest("[data-lm]"); if (lm) { listMode = lm.dataset.lm; renderList(); return; }
   const lc = e.target.closest("[data-lc]"); if (lc) { listCat = lc.dataset.lc; renderList(); return; }
+  const tg = e.target.closest("[data-today-go]"); if (tg) { tab(tg.dataset.todayGo); window.scrollTo(0, 0); return; }
+  if (e.target.closest("[data-five]")) { toggleFive(); return; }
   const fb = e.target.closest("[data-fb]"); if (fb) { openFeedbackFor(fb.dataset.fb); return; }
   const m = e.target.closest("[data-mode]"); if (m) { startQuiz(m.dataset.mode); return; }
   const pr = e.target.closest("[data-practice]"); if (pr) { if (pr.dataset.practice === "compose") startCompose(); if (pr.dataset.practice === "dict") startDict(); if (pr.dataset.practice === "sounds") startSounds(); if (pr.dataset.practice === "weekly") startCompose(weeklyItems(), "weekly"); return; }
@@ -2138,6 +2145,125 @@ document.addEventListener("click", (e) => {
     finishAnswer(ok, ok ? "" : `強く読むのは ${sylls(q.w)[stressIdx(q.w)].toLowerCase()} です。${q.w.stressNote || ""}`);
   }
 });
+
+/* ================= 今日（続ける仕組み、v0.24.0） =================
+   今日のリング（単語・シャドーイング・会話）、連続日数とお休み券、5分だけモード。
+   記録は settings.habit：{ days: { "YYYY-MM-DD": { w 単語の回答数, n うち新しい単語, s 文, t 会話, f 5分だけモード, c 1日分として数えた } }, anchor, best }
+   AI・Speech は使わない（費用なし） */
+const habit = () => { const h = (st().habit = st().habit || {}); h.days = h.days || {}; return h; };
+function habitDay() { const h = habit(), t = S.ymd(); return (h.days[t] = h.days[t] || {}); }
+function todayRings() {
+  const d = habit().days[S.ymd()] || {};
+  return S.habitRings(d, { w: [wCur, ...wQueue].filter(Boolean).length, s: [sCur, ...sQueue].filter(Boolean).length }, TALK_GOAL);
+}
+/** 学習したら呼ぶ。今日の分を終えたら、その日を1日分として数える（一度数えた日は取り消さない） */
+function habitTick(kind, extra) {
+  if (!loaded) return;
+  const d = habitDay();
+  if (kind) d[kind] = (d[kind] || 0) + 1;
+  if (extra) d[extra] = (d[extra] || 0) + 1;
+  checkCleared();
+}
+function checkCleared() {
+  const h = habit(), d = habitDay();
+  if (!d.c && S.habitCounts(d, todayRings())) {
+    d.c = 1;
+    const sc = S.habitScan(h, S.ymd());
+    h.best = sc.best;
+    if ($("view-today").hidden) showBanner(`今日の分を終えました。${sc.current}日連続です（「今日」タブで確認できます）。`);
+  }
+  saveSettings();
+  if (!$("view-today").hidden) renderToday();
+}
+function toggleFive() {
+  if (!loaded) return;
+  const d = habitDay();
+  d.f = d.f ? 0 : 1;
+  checkCleared();
+}
+const RING_R = [70, 54, 38];
+function ringsSvg(r, size) {
+  const parts = [["w", "var(--accent)"], ["s", "var(--easy)"], ["t", "var(--stress)"]].map(([k, c], i) => {
+    const R = RING_R[i], C = 2 * Math.PI * R, p = Math.max(0, Math.min(1, r[k].p));
+    return `<circle cx="80" cy="80" r="${R}" style="stroke:var(--line)"/>` +
+      (p > 0 ? `<circle cx="80" cy="80" r="${R}" style="stroke:${c}" stroke-dasharray="${(C * p).toFixed(1)} ${C.toFixed(1)}"/>` : "");
+  }).join("");
+  const label = `単語 ${Math.round(r.w.p * 100)}%、シャドーイング ${Math.round(r.s.p * 100)}%、会話 ${Math.round(r.t.p * 100)}%`;
+  return `<svg class="rings" width="${size}" height="${size}" viewBox="0 0 160 160" role="img" aria-label="${label}"><g transform="rotate(-90 80 80)" fill="none" stroke-linecap="round" stroke-width="12">${parts}</g></svg>`;
+}
+function weekDotsHTML(week) {
+  return `<div class="wkdots">${week.map((x) => {
+    const lbl = x.state === "today" || (x.state === "done" && x.date === S.ymd()) ? "今日" : x.dow;
+    const txt = { done: "済み", rest: "お休み券", miss: "休み", today: "まだ", none: "記録前" }[x.state];
+    return `<div class="wkd"><span class="dot ${x.state}" title="${x.date} ${txt}"><span class="sr">${x.date} ${txt}</span>${x.state === "rest" ? "休" : ""}</span><span class="note">${lbl}</span></div>`;
+  }).join("")}</div>`;
+}
+function renderToday() {
+  const v = $("view-today");
+  if (!v) return;
+  if (!loaded) { v.innerHTML = emptyCard("読み込んでいます", ""); return; }
+  const today = S.ymd(), h = habit(), d = h.days[today] || {};
+  const r = todayRings(), sc = S.habitScan(h, today), week = S.habitWeek(h, today, sc);
+  const five = !!d.f, done = !!d.c;
+  // 次にやること：5分だけモードは単語だけ、ふだんは単語 → シャドーイング → 会話の順に、まだ満タンでないもの
+  const order = five ? ["w"] : ["w", "s", "t"];
+  const nextKey = order.find((k) => r[k].p < 1) || (done ? ["w", "s", "t"].find((k) => r[k].p < 1) : null);
+  const NEXT = {
+    w: { tab: "study", title: r.w.done ? "単語を続ける" : "単語から始める", sub: `残り ${r.w.total - r.w.done}語` },
+    s: { tab: "shadow", title: r.s.done ? "シャドーイングを続ける" : "シャドーイングを始める", sub: `残り ${r.s.total - r.s.done}文` },
+    t: { tab: "talk", title: "会話を1つ練習する", sub: "場面を選んで、振り返りまで" },
+  };
+  const restNote = five ? "5分だけモードでは任意" : "";
+  const legend = [
+    ["w", "単語", "var(--accent)", r.w.total ? `${r.w.done} / ${r.w.total}語` : "今日の分はありません", ""],
+    ["s", "シャドーイング", "var(--easy)", r.s.total ? `${r.s.done} / ${r.s.total}文` : "今日の分はありません", restNote],
+    ["t", "会話", "var(--stress)", `${r.t.done} / ${r.t.total}回`, restNote],
+  ].map(([k, name, c, det, extra]) => `<div class="lg${extra ? " opt" : ""}"><span class="sw" style="background:${c}"></span><span class="grow"><b>${name}</b><span class="note">${det}${r[k].p >= 1 && r[k].total ? "　済み" : ""}${extra ? `（${extra}）` : ""}</span></span></div>`).join("");
+  const ret = S.retentionSummary(st().retention || {}, 1);
+  const wkStart = S.weekOf(today);
+  const daysThisWeek = Object.entries(sc.states).filter(([dt, x]) => dt >= wkStart && x === "done").length + (sc.todayDone ? 1 : 0);
+  const after = sc.todayDone ? "今日の分は終わりました" : sc.run > 0 ? `今日を終えると ${sc.run + 1}日連続になります` : "今日を終えると1日目になります";
+  const cleared = done ? `<article class="card cleared">
+      <h2>${five ? "今日の分（5分だけ）、達成しました" : "今日の30分、達成しました"}</h2>
+      <p class="note" style="margin:0">${sc.current}日連続になりました</p>
+      <div class="sumgrid">
+        <div><span class="note">新しい単語</span><b>${d.n || 0}語</b></div>
+        <div><span class="note">単語の復習</span><b>${Math.max(0, (d.w || 0) - (d.n || 0))}回</b></div>
+        <div><span class="note">シャドーイング</span><b>${d.s || 0}文</b></div>
+        <div><span class="note">会話</span><b>${d.t || 0}回</b></div>
+      </div>
+    </article>` : "";
+  const nextBtn = nextKey
+    ? `<button class="btn ${done ? "" : "primary "}nextbtn" data-today-go="${NEXT[nextKey].tab}"><span>${done ? "続けるなら：" : ""}${NEXT[nextKey].title}</span><small>${NEXT[nextKey].sub}</small></button>`
+    : `<button class="btn primary nextbtn" data-today-go="quiz"><span>時間があれば練習</span><small>瞬間作文・ディクテーション・今週のまとめ</small></button>`;
+  v.innerHTML = `<div class="today">
+    <article class="card streak">
+      <div class="row between" style="align-items:flex-end">
+        <div class="row" style="align-items:baseline;gap:6px"><span class="streak-n">${sc.current}</span><b>日連続</b></div>
+        <div class="note" style="text-align:right;line-height:1.5">最長 ${sc.best}日<br>お休み券 残り${sc.freezeLeft}枚（今週）</div>
+      </div>
+      ${weekDotsHTML(week)}
+      <p class="note" style="margin:0">${after}</p>
+    </article>
+    <div class="today-main">
+      ${cleared}
+      <article class="card ringcard">
+        ${ringsSvg(r, 132)}
+        <div class="legend">${legend}</div>
+      </article>
+      ${nextBtn}
+      <article class="card fiverow">
+        <div class="grow"><label for="five-sw"><b>5分だけモード</b></label><span class="note" style="display:block">忙しい日は、単語を終えれば1日分にします（今日だけ）</span></div>
+        <button id="five-sw" class="switch" role="switch" aria-checked="${five}" data-five><span></span></button>
+      </article>
+      <div class="statrow">
+        <div class="card mini"><span class="note">定着率（今週）</span><b>${ret.total.rate == null ? "—" : ret.total.rate + "%"}</b></div>
+        <div class="card mini"><span class="note">今週の学習日</span><b>${daysThisWeek}日</b></div>
+      </div>
+      <p class="note" style="margin:0">1日分の数え方：3つのリングが埋まる日、または5分だけモードで単語を終えた日。休んだ日は、週に1枚のお休み券を自動で使い、連続日数は切れません（増えもしません）。</p>
+    </div>
+  </div>`;
+}
 
 /* ---------- 起動 ---------- */
 async function load() {
@@ -2166,11 +2292,15 @@ async function load() {
   scenes = null; // 共通の教材の場面を読み直す
   maybeAskShare();
   buildWordQueue(); buildSentenceQueue();
+  // 続ける仕組み：古い日の記録をまとめて、settings を大きくしない
+  { const h = habit(), n = Object.keys(h.days).length; S.habitFold(h, S.ymd()); if (Object.keys(h.days).length !== n) saveSettings(); }
+  renderToday();
   renderStudy();
   if (!$("view-shadow").hidden) renderShadow();
   if (!$("view-list").hidden) renderList();
   counts();
 }
+renderToday();
 renderStudy();
 refreshOutputs();
 load().then(() => pullContent(true)).catch((e) => { if (e.message !== "auth") { loaded = true; showBanner("データを読み込めませんでした。ページを開き直してください。"); renderStudy(); } });

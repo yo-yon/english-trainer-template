@@ -213,3 +213,51 @@ details.guide[open] summary{margin-bottom:4px}
 .guide .gk{color:var(--muted);white-space:nowrap;font-size:13px}
 .guide .gfix{font-weight:600}
 .guide .gex{flex-wrap:wrap;align-items:center;gap:6px}
+
+/* 今日（続ける仕組み、v0.24.0）：リング・連続日数・お休み券・5分だけモード */
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.today{display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}
+.today-main{display:flex;flex-direction:column;gap:14px;min-width:0}
+.today .card{padding:16px}
+.streak{gap:12px}
+.streak-n{font-family:var(--f-word);font-size:40px;font-weight:700;line-height:1;color:var(--accent);font-variant-numeric:tabular-nums}
+.wkdots{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.wkd{display:flex;flex-direction:column;align-items:center;gap:2px}
+.wkd .note{font-size:11px}
+.dot{position:relative;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;box-sizing:border-box}
+.dot.done{background:var(--accent);color:var(--accent-ink)}
+.dot.rest{background:var(--bg);color:var(--ink);border:1px dashed var(--muted)}
+.dot.miss{background:var(--bg);border:1px solid var(--line)}
+.dot.today{background:var(--surface);border:2px solid var(--accent)}
+.dot.none{background:transparent;border:1px dashed var(--line)}
+.ringcard{flex-direction:row!important;align-items:center;gap:16px!important}
+.rings{flex:none}
+.legend{display:flex;flex-direction:column;gap:10px;flex:1;min-width:0}
+.lg{display:flex;align-items:center;gap:8px}
+.lg .grow{display:flex;flex-direction:column;line-height:1.4}
+.lg.opt{opacity:.7}
+.sw{width:10px;height:10px;border-radius:50%;flex:none}
+.nextbtn{flex-direction:column;gap:0!important;justify-content:center;width:100%;min-height:56px}
+.nextbtn small{font-weight:400;font-size:12px;opacity:.9}
+.fiverow{flex-direction:row!important;align-items:center;gap:12px!important}
+.fiverow .grow{flex:1;min-width:0}
+.fiverow label{cursor:pointer}
+.switch{width:52px;height:32px;border-radius:16px;border:0;padding:3px;cursor:pointer;display:flex;flex:none;background:var(--muted);justify-content:flex-start}
+.switch[aria-checked="true"]{background:var(--accent);justify-content:flex-end}
+.switch span{width:26px;height:26px;border-radius:50%;background:#fff;display:block}
+.statrow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card.mini{padding:12px!important;gap:2px!important}
+.card.mini b{font-size:20px;font-variant-numeric:tabular-nums}
+.cleared{align-items:center;text-align:center;gap:10px!important}
+.cleared h2{margin:0;font-size:19px}
+.sumgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;text-align:left}
+.sumgrid>div{display:flex;flex-direction:column;background:var(--bg);border-radius:10px;padding:8px 12px}
+.sumgrid b{font-size:17px}
+/* PC：今日の画面だけ広げ、左にリング、右に連続日数。ほかのタブは今までの幅 */
+@media (min-width:900px){
+  .wrap{max-width:960px}
+  .wrap>section:not(#view-today){width:100%;max-width:600px;margin-inline:auto}
+  .today{grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start}
+  .today .streak{grid-column:2;grid-row:1}
+  .today-main{grid-column:1;grid-row:1}
+}
