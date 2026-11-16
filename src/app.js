@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.24.0";
+const APP_VERSION = "0.25.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -1897,6 +1897,7 @@ function renderList() {
         <button class="btn" id="diag-refresh">更新</button>
       </details>
       ${contentHTML()}
+      ${templateHTML()}
       <details ${data.words.length ? "" : "open"}><summary>データ管理</summary>
         <p class="note">最初に入っている単語とシャドーイング用の文を取り込みます。同じIDのデータは上書きされます（復習の記録は消えません）。</p>
         <button class="btn" id="import">初期データを取り込む</button>
@@ -1924,8 +1925,65 @@ function renderList() {
     $("content-pull").onclick = () => pullContent(false);
     $("content-auto").onchange = (e) => { st().contentAuto = e.target.checked; saveSettings(); };
   }
+  $("tpl-on").onchange = (e) => { st().templateCheck = e.target.checked; saveSettings(); if (e.target.checked) checkTemplate(true); else renderList(); };
+  if ($("tpl-check")) $("tpl-check").onclick = () => checkTemplate(true);
   $("fb-details").ontoggle = (e) => { if (e.target.open && !fbHistory) loadFbHistory(); };
 }
+/* ---------- テンプレートの更新のお知らせ（v0.25.0） ----------
+   テンプレートから作ったリポジトリには「Sync fork」がなく、更新に気づきにくい。
+   公開テンプレートの CHANGELOG.md を1日1回読み、自分の版より新しい版があれば知らせる（読みに行くだけで、こちらからは何も送らない）。
+   一覧タブで止められる（settings.templateCheck = false）。結果は端末に保存（localStorage） */
+const TPL_REPO = "https://github.com/yo-yon/english-trainer-template";
+const TPL_CHANGELOG_RAW = "https://raw.githubusercontent.com/yo-yon/english-trainer-template/main/CHANGELOG.md";
+const TPL_KEY = "et-template";
+let tplInfo = null, tplBusy = false, tplError = "";
+const tplLoad = () => { try { return JSON.parse(localStorage.getItem(TPL_KEY) || "null"); } catch (e) { return null; } };
+const tplSave = (x) => { try { localStorage.setItem(TPL_KEY, JSON.stringify(x)); } catch (e) {} };
+const tplNewer = () => (tplInfo ? S.newerVersions(tplInfo.list, APP_VERSION) : []);
+async function checkTemplate(force) {
+  if (st().templateCheck === false || tplBusy) return;
+  const cached = tplLoad();
+  tplInfo = cached;
+  if (force || !cached || !(Date.now() - (cached.at || 0) < S.DAY)) {
+    tplBusy = true; tplError = "";
+    if (force && !$("view-list").hidden) renderList();
+    try {
+      const r = await fetch(TPL_CHANGELOG_RAW, { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
+      if (!r.ok) throw new Error(String(r.status));
+      tplInfo = { at: Date.now(), list: S.parseChangelog(await r.text()).slice(0, 30), seen: (cached && cached.seen) || "" };
+      tplSave(tplInfo);
+    } catch (e) { tplError = "テンプレートの更新を確認できませんでした（通信を確認して、あとでもう一度）。"; }
+    finally { tplBusy = false; }
+  }
+  const nw = tplNewer();
+  // 新しい版を見つけたら一度だけお知らせ（同じ版では二度出さない）
+  if (nw.length && tplInfo.seen !== nw[0].v) {
+    showBanner(`テンプレートに新しい版 v${nw[0].v} があります（いまは v${APP_VERSION}）。取り込み方は「一覧」タブの「テンプレートの更新」にあります。`);
+    tplInfo.seen = nw[0].v; tplSave(tplInfo);
+  }
+  if (!$("view-list").hidden) renderList();
+}
+function templateHTML() {
+  const on = st().templateCheck !== false;
+  const nw = on ? tplNewer() : [];
+  const status = !on ? "確認していません"
+    : tplBusy ? "確認しています…"
+    : tplError ? esc(tplError)
+    : !tplInfo ? "まだ確認していません"
+    : nw.length ? `<b>新しい版が${nw.length}つあります</b>（いまは v${APP_VERSION}）`
+    : `最新です（v${APP_VERSION}）。最後の確認：${esc(S.ymd(tplInfo.at))}`;
+  const items = nw.slice(0, 5).map((x) => `<li><b>v${esc(x.v)}</b>${x.date ? `（${esc(x.date)}）` : ""}${x.note ? `<br><span class="note">${esc(x.note)}</span>` : ""}</li>`).join("");
+  return `<div class="sharebox">
+      <p style="margin:0"><b>テンプレートの更新</b> <span class="note">テンプレートから作った人向け。新しい版が出たら知らせます</span></p>
+      <label><input type="checkbox" id="tpl-on" ${on ? "checked" : ""}> 1日1回、テンプレートの更新を確認する</label>
+      <p class="note" style="margin:0">${status}</p>
+      ${items ? `<ul class="rv" style="margin:0">${items}</ul>${nw.length > 5 ? `<p class="note" style="margin:0">ほか${nw.length - 5}つ</p>` : ""}` : ""}
+      ${nw.length ? `<p class="note" style="margin:0">自分の版より新しい版の「変わったファイル」を、古い順にすべて取り込んでください。</p>
+      <div class="row"><a class="btn" href="${TPL_REPO}/blob/main/CHANGELOG.md" target="_blank" rel="noopener">変更履歴を見る</a><a class="btn" href="${TPL_REPO}/blob/main/docs/UPDATING.md" target="_blank" rel="noopener">取り込み方</a></div>` : ""}
+      ${on ? `<button class="btn" id="tpl-check"${tplBusy ? " disabled" : ""}>今すぐ確認する</button>` : ""}
+    </div>`;
+}
+
 /* ---------- 共通の教材（v0.19.0） ----------
    作者が毎週公開する一般的な教材（単語・文・会話の場面）を、自分の Table に取り込む。週1回は自動、ボタンでいつでも */
 function contentHTML() {
@@ -2303,7 +2361,7 @@ async function load() {
 renderToday();
 renderStudy();
 refreshOutputs();
-load().then(() => pullContent(true)).catch((e) => { if (e.message !== "auth") { loaded = true; showBanner("データを読み込めませんでした。ページを開き直してください。"); renderStudy(); } });
+load().then(() => { checkTemplate(false); return pullContent(true); }).catch((e) => { if (e.message !== "auth") { loaded = true; showBanner("データを読み込めませんでした。ページを開き直してください。"); renderStudy(); } });
 /* 別の端末で学習したあとに戻ってきたら読み直す（スマホとPCの同期） */
 /* ---------- 新しい版の確認 ----------
    iPhone の Chrome は、タブを開き直してもページを読み込み直さず、前の画面をそのまま出すことがある。

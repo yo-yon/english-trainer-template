@@ -261,3 +261,6 @@ details.guide[open] summary{margin-bottom:4px}
   .today .streak{grid-column:2;grid-row:1}
   .today-main{grid-column:1;grid-row:1}
 }
+
+/* テンプレートの更新のお知らせ（v0.25.0）：ボタン風のリンク */
+a.btn{text-decoration:none}

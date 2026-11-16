@@ -25,7 +25,15 @@
 2. （任意）[docs/FEEDBACK-LOOP.md](docs/FEEDBACK-LOOP.md) で、週次の学習レポートを有効にする
 3. （任意）[docs/CLAUDE-TASK.md](docs/CLAUDE-TASK.md) で、Claude に毎週の改善案を作らせる
 
-更新の取り込み方は [docs/UPDATING.md](docs/UPDATING.md)、変更点は [CHANGELOG.md](CHANGELOG.md) にあります。
+## すでに構築した人へ：新しい版の取り込み
+
+このテンプレートは改善を続けています。テンプレートから作ったリポジトリは自動では更新されないので、**自分で取り込みます**。
+
+1. 自分のアプリの版を確かめる（画面右上の `v0.xx.x`）
+2. [CHANGELOG.md](CHANGELOG.md) で、自分の版より新しい版を見る。各版の「**更新するときの注意**」（Azure の設定の追加など）も読む
+3. その版の「変わったファイル」を、**古い版から順にすべて**、自分のリポジトリに貼り替える（GitHub の画面だけでできます）
+
+くわしい手順は [docs/UPDATING.md](docs/UPDATING.md) にあります。v0.25.0 以降は、新しい版が出るとアプリが知らせます（画面の上のお知らせと、「一覧」タブの「テンプレートの更新」）。
 
 ## 費用の目安（あなたの Azure にかかります）
 
