@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.25.0";
+const APP_VERSION = "0.26.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -1324,6 +1324,7 @@ async function talkReview() {
     const today = S.ymd();
     if (!st().talkLog || st().talkLog.date !== today) st().talkLog = { date: today, count: 0 };
     st().talkLog.count++; saveSettings();
+    { const ts = talkStats(), h = habit(); h.totals = h.totals || {}; h.totals.tools = (h.totals.tools || 0) + ts.tools; if (ts.clarify) h.totals.clarify = (h.totals.clarify || 0) + 1; }
     habitTick("t");
   } catch (e) {}
   finally { if (talk) { talk.waiting = false; renderTalk(); } }
@@ -2187,6 +2188,7 @@ document.addEventListener("click", (e) => {
   const lc = e.target.closest("[data-lc]"); if (lc) { listCat = lc.dataset.lc; renderList(); return; }
   const tg = e.target.closest("[data-today-go]"); if (tg) { tab(tg.dataset.todayGo); window.scrollTo(0, 0); return; }
   if (e.target.closest("[data-five]")) { toggleFive(); return; }
+  const cn = e.target.closest("[data-cal]"); if (cn) { calOffset = Math.max(-1, Math.min(0, calOffset + +cn.dataset.cal)); renderToday(); return; }
   const fb = e.target.closest("[data-fb]"); if (fb) { openFeedbackFor(fb.dataset.fb); return; }
   const m = e.target.closest("[data-mode]"); if (m) { startQuiz(m.dataset.mode); return; }
   const pr = e.target.closest("[data-practice]"); if (pr) { if (pr.dataset.practice === "compose") startCompose(); if (pr.dataset.practice === "dict") startDict(); if (pr.dataset.practice === "sounds") startSounds(); if (pr.dataset.practice === "weekly") startCompose(weeklyItems(), "weekly"); return; }
@@ -2217,21 +2219,110 @@ function todayRings() {
 /** 学習したら呼ぶ。今日の分を終えたら、その日を1日分として数える（一度数えた日は取り消さない） */
 function habitTick(kind, extra) {
   if (!loaded) return;
-  const d = habitDay();
-  if (kind) d[kind] = (d[kind] || 0) + 1;
+  const h = habit(), d = habitDay();
+  if (kind) { d[kind] = (d[kind] || 0) + 1; h.totals = h.totals || {}; h.totals[kind] = (h.totals[kind] || 0) + 1; }
   if (extra) d[extra] = (d[extra] || 0) + 1;
   checkCleared();
 }
 function checkCleared() {
-  const h = habit(), d = habitDay();
-  if (!d.c && S.habitCounts(d, todayRings())) {
+  const h = habit(), d = habitDay(), r = todayRings();
+  // その日の進み具合（%）。記録のカレンダーの濃さに使う。5分だけモードの日は単語のリングだけ
+  d.p = Math.round((d.f ? r.w.p : (r.w.p + r.s.p + r.t.p) / 3) * 100);
+  if (!d.c && S.habitCounts(d, r)) {
     d.c = 1;
     const sc = S.habitScan(h, S.ymd());
     h.best = sc.best;
     if ($("view-today").hidden) showBanner(`今日の分を終えました。${sc.current}日連続です（「今日」タブで確認できます）。`);
   }
+  checkBadges(true);
   saveSettings();
   if (!$("view-today").hidden) renderToday();
+}
+/* ---------- 実績バッジ（v0.26.0） ----------
+   条件は src/srs.js の BADGES。獲得した日は settings.habit.badges に残す（条件が後で下がっても消さない） */
+function badgeCtx() {
+  const h = habit(), t = h.totals || {};
+  const sc = S.habitScan(h, S.ymd());
+  const retBest = Math.max(0, ...Object.values(st().retention || {}).map((b) => {
+    let n = 0, ok = 0; for (const x of Object.values(b)) { n += x.n || 0; ok += x.ok || 0; }
+    return n >= 10 ? Math.round((ok / n) * 100) : 0;
+  }));
+  return {
+    best: sc.best, cleared: sc.best > 0 ? 1 : 0,
+    mature: Object.values(data.cards.word || {}).filter((c) => (c.interval || 0) >= 7).length,
+    talks: t.t || 0, tools: t.tools || 0, clarify: t.clarify || 0,
+    phrases: (data.phrases || []).length, retBest, weekly: Object.keys(st().weekly || {}).length,
+  };
+}
+let badgeNew = new Set(); // この画面で新しく獲得したもの（「新しい」の印）
+function checkBadges(notify) {
+  if (!loaded) return [];
+  const h = habit(), got = (h.badges = h.badges || {}), today = S.ymd();
+  const fresh = S.badgeStatus(badgeCtx()).filter((b) => b.done && !got[b.id]);
+  for (const b of fresh) { got[b.id] = today; badgeNew.add(b.id); }
+  if (fresh.length) {
+    saveSettings();
+    if (notify && $("view-today").hidden) showBanner(fresh.length === 1 ? `バッジ「${fresh[0].name}」を獲得しました（「今日」タブで確認できます）。` : `バッジを${fresh.length}つ獲得しました：${fresh.map((b) => b.name).join("・")}（「今日」タブで確認できます）。`);
+  }
+  return fresh;
+}
+/* 会話の振り返りで数える：使えた会話の道具の数と、聞き返しのきっかけに聞き返せたか（toolsReviewHTML と同じ判定） */
+function talkStats() {
+  const mine = talk.history.filter((t) => t.who === "me").map((t) => t.text);
+  const ci = talk.history.findIndex((t) => t.who === "ai" && t.challenge);
+  const next = ci >= 0 ? talk.history.slice(ci + 1).find((t) => t.who === "me") : null;
+  return { tools: S.toolsUsed(mine).length, clarify: !!(next && S.isClarify(next.text)) };
+}
+let calOffset = 0; // 記録のカレンダー：0＝今月、-1＝先月（日ごとの記録は62日分）
+function calendarHTML(h, today, sc) {
+  const base = new Date(today.slice(0, 7) + "-01T00:00:00Z");
+  base.setUTCMonth(base.getUTCMonth() + calOffset);
+  const ym = base.toISOString().slice(0, 7);
+  const cells = S.habitMonth(h, ym, today, sc);
+  const inMonth = cells.filter((c) => c.inMonth && c.date <= today);
+  const doneN = inMonth.filter((c) => c.level === "done").length, restN = inMonth.filter((c) => c.level === "rest").length;
+  const TXT = { done: "1日分", part: "半分以上", low: "少し", rest: "お休み券", miss: "なし", today: "今日", future: "", none: "記録前" };
+  return `<article class="card cal">
+    <div class="row between">
+      <div class="row" style="gap:4px">
+        <button class="iconbtn" data-cal="-1" aria-label="先月"${calOffset <= -1 ? " disabled" : ""}>‹</button>
+        <b>${+ym.slice(0, 4)}年${+ym.slice(5)}月</b>
+        <button class="iconbtn" data-cal="1" aria-label="次の月"${calOffset >= 0 ? " disabled" : ""}>›</button>
+      </div>
+      <span class="note">${doneN}日${restN ? `・お休み券${restN}回` : ""}</span>
+    </div>
+    <div class="calgrid">${"月火水木金土日".split("").map((x) => `<span class="note calh">${x}</span>`).join("")}${cells.map((c) => `<span class="calc ${c.level}${c.inMonth ? "" : " out"}" title="${c.date} ${TXT[c.level]}">${c.day}<span class="sr">${TXT[c.level]}</span></span>`).join("")}</div>
+    <div class="callegend note"><span><i class="calc low"></i>少し</span><span><i class="calc part"></i>半分以上</span><span><i class="calc done"></i>1日分</span><span><i class="calc rest"></i>お休み券</span></div>
+  </article>`;
+}
+function retentionTrendHTML(today) {
+  const ws = S.retentionWeeks(st().retention || {}, 4, today);
+  const rows = ws.map((w) => `<div class="trend"><span class="note">${+w.week.slice(5, 7)}/${+w.week.slice(8)}〜</span><div class="bar"><i style="width:${w.rate || 0}%"></i></div><b>${w.rate == null ? "—" : w.rate + "%"}</b></div>`).join("");
+  return `<article class="card">
+    <div><b>定着率の推移</b><span class="note" style="display:block">7日以上あけた復習で覚えていた割合（週ごと）</span></div>
+    ${rows}
+    ${ws.every((w) => w.rate == null) ? `<p class="note" style="margin:0">復習の間隔が7日を超えると集まり始めます。</p>` : ""}
+  </article>`;
+}
+function badgesHTML() {
+  const got = habit().badges || {};
+  const list = S.badgeStatus(badgeCtx());
+  const isOn = (b) => !!got[b.id] || b.done;
+  const n = list.filter(isOn).length;
+  // 獲得したもの → 次に近いもの3つ（進み具合の大きい順）。残りは折りたたむ
+  const rest = list.filter((b) => !isOn(b)).sort((a, b) => b.cur / b.goal - a.cur / a.goal);
+  const card = (b) => {
+      const on = !!got[b.id] || b.done;
+      return `<div class="badge${on ? " on" : ""}${badgeNew.has(b.id) ? " new" : ""}">
+        <span class="bdg" aria-hidden="true">${on ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12.5l4 4 8-9"/></svg>' : ""}</span>
+        <span class="grow"><b>${esc(b.name)}</b>${badgeNew.has(b.id) ? ' <span class="chip used">新しい</span>' : ""}<span class="note" style="display:block">${esc(b.desc)}${on ? (got[b.id] ? `（${esc(got[b.id].slice(5).replace("-", "/"))}）` : "") : `（${b.cur} / ${b.goal}）`}</span></span>
+      </div>`;
+  };
+  return `<article class="card">
+    <div class="row between"><b>実績バッジ</b><span class="note">${n} / ${list.length}</span></div>
+    <div class="badges">${list.filter(isOn).map(card).join("")}${rest.slice(0, 3).map(card).join("")}</div>
+    ${rest.length > 3 ? `<details><summary class="note">ほかのバッジ（${rest.length - 3}）</summary><div class="badges" style="margin-top:8px">${rest.slice(3).map(card).join("")}</div></details>` : ""}
+  </article>`;
 }
 function toggleFive() {
   if (!loaded) return;
@@ -2260,6 +2351,7 @@ function renderToday() {
   const v = $("view-today");
   if (!v) return;
   if (!loaded) { v.innerHTML = emptyCard("読み込んでいます", ""); return; }
+  checkBadges(false); // フレーズ帳の保存など、学習の記録以外で条件を満たしたものもここで拾う
   const today = S.ymd(), h = habit(), d = h.days[today] || {};
   const r = todayRings(), sc = S.habitScan(h, today), week = S.habitWeek(h, today, sc);
   const five = !!d.f, done = !!d.c;
@@ -2295,6 +2387,7 @@ function renderToday() {
     ? `<button class="btn ${done ? "" : "primary "}nextbtn" data-today-go="${NEXT[nextKey].tab}"><span>${done ? "続けるなら：" : ""}${NEXT[nextKey].title}</span><small>${NEXT[nextKey].sub}</small></button>`
     : `<button class="btn primary nextbtn" data-today-go="quiz"><span>時間があれば練習</span><small>瞬間作文・ディクテーション・今週のまとめ</small></button>`;
   v.innerHTML = `<div class="today">
+    <div class="today-side">
     <article class="card streak">
       <div class="row between" style="align-items:flex-end">
         <div class="row" style="align-items:baseline;gap:6px"><span class="streak-n">${sc.current}</span><b>日連続</b></div>
@@ -2303,6 +2396,8 @@ function renderToday() {
       ${weekDotsHTML(week)}
       <p class="note" style="margin:0">${after}</p>
     </article>
+    ${calendarHTML(h, today, sc)}
+    </div>
     <div class="today-main">
       ${cleared}
       <article class="card ringcard">
@@ -2319,6 +2414,10 @@ function renderToday() {
         <div class="card mini"><span class="note">今週の学習日</span><b>${daysThisWeek}日</b></div>
       </div>
       <p class="note" style="margin:0">1日分の数え方：3つのリングが埋まる日、または5分だけモードで単語を終えた日。休んだ日は、週に1枚のお休み券を自動で使い、連続日数は切れません（増えもしません）。</p>
+    </div>
+    <div class="today-more">
+      ${retentionTrendHTML(today)}
+      ${badgesHTML()}
     </div>
   </div>`;
 }
