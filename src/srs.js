@@ -760,5 +760,30 @@
     return h;
   }
 
-  return { addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  /* ---------- テンプレートの更新のお知らせ（v0.25.0） ---------- */
+  /** "0.24.0" と "0.9.1" を数として比べる（a が新しければ正） */
+  function cmpVersion(a, b) {
+    const pa = String(a || "").split(".").map((x) => parseInt(x, 10) || 0), pb = String(b || "").split(".").map((x) => parseInt(x, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
+    return 0;
+  }
+  /**
+   * テンプレートの CHANGELOG.md から版の一覧を取り出す。見出し「## 0.24.0（2026-11-16）」と、その下の「**更新するときの注意**：…」の行
+   * 返り値：[{ v, date, note }]（書かれている順＝新しい順）
+   */
+  function parseChangelog(md) {
+    const out = [];
+    let cur = null;
+    for (const line of String(md || "").split(/\r?\n/)) {
+      const h = line.match(/^##\s+v?(\d+\.\d+(?:\.\d+)?)\s*(?:[（(]\s*(\d{4}-\d{2}-\d{2})\s*[）)])?/);
+      if (h) { cur = { v: h[1], date: h[2] || "", note: "" }; out.push(cur); continue; }
+      const n = cur && !cur.note && line.match(/^\*\*更新するときの注意\*\*[：:]\s*(.+)$/);
+      if (n) cur.note = n[1].trim().slice(0, 300);
+    }
+    return out;
+  }
+  /** 今の版より新しい版だけ（新しい順） */
+  const newerVersions = (list, current) => (list || []).filter((x) => cmpVersion(x.v, current) > 0).sort((a, b) => cmpVersion(b.v, a.v));
+
+  return { cmpVersion, parseChangelog, newerVersions, addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });
