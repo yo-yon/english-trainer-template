@@ -1902,32 +1902,49 @@ function renderSettings() {
   const v = $("view-settings");
   v.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
     <div class="card settings">
+      <h2 class="set-h">📚 学習の量</h2>
+      <p class="note" style="margin:-8px 0 0">1日に出す新しい単語・文の数</p>
       <label for="npd">1日の新しい単語 <select id="npd">${[5, 10, 15, 20].map((n) => `<option ${n === st().newPerDay ? "selected" : ""}>${n}</option>`).join("")}</select> 語</label>
       <label for="nsd">1日の新しい文 <select id="nsd">${[3, 5, 8, 10].map((n) => `<option ${n === st().newSentencesPerDay ? "selected" : ""}>${n}</option>`).join("")}</select> 文</label>
-      <label for="strict">シャドーイングの採点 <select id="strict">${Object.entries(S.STRICTNESS).map(([k, v]) => `<option value="${k}" ${k === st().strictness ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select></label>
-      ${hubOn() ? `<div class="sharebox">
-        <label><input type="checkbox" id="share-toggle" ${st().shareFeedback === true ? "checked" : ""}> 👎 やご意見を作者にも送る（匿名）</label>
-        <p class="note" style="margin:0">送る・送らないは、送るたびに選べます。<button class="linkbtn" id="share-detail">送る内容を見る</button>　端末 ID：<code>${esc((st().instanceId || "").slice(0, 8))}…</code> <button class="linkbtn" id="share-reset">作り直す</button></p>
-      </div>` : ""}
-      <label><input type="checkbox" id="hide" ${st().hideText ? "checked" : ""}> シャドーイングで、評価前は文をぼかす（聞き取り重視）</label>
-      <label><input type="checkbox" id="prosody" ${st().prosody === true ? "checked" : ""}> シャドーイングで、リズム・抑揚も評価する（Azure の追加料金）</label>
-      <p class="note" style="margin:-6px 0 0">強勢・イントネーション・話す速さ・リズムの点と、余計な区切り・単調な言い方を表示します。発音評価の料金に、評価した音声の長さの分だけ追加料金がかかります（無料枠 F0 で使えるかは未確認）。判定点と復習の評価には入れません。</p>
-      <p class="note" style="margin:0">今月の読み上げ（Azure）：約${(st().tts && st().tts.month === S.ymd().slice(0, 7) ? st().tts.chars : 0).toLocaleString()}文字 ／ 無料枠 500,000文字。一度聞いた音声は端末に保存され、再生しても文字数は増えません。</p>
-      <details id="fb-details"><summary>送ったフィードバック</summary>
-        <div class="list fbhist" id="fb-hist" style="margin-top:8px">${fbHistoryHTML()}</div>
-      </details>
+    </div>
+    <div class="card settings">
+      <h2 class="set-h">🗣️ シャドーイング</h2>
+      <label for="strict">採点の厳しさ <select id="strict">${Object.entries(S.STRICTNESS).map(([k, v]) => `<option value="${k}" ${k === st().strictness ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select></label>
+      <label><input type="checkbox" id="hide" ${st().hideText ? "checked" : ""}> 評価前は文をぼかす（聞き取り重視）</label>
+      <label><input type="checkbox" id="prosody" ${st().prosody === true ? "checked" : ""}> リズム・抑揚も評価する（Azure の追加料金）</label>
+      <p class="note" style="margin:-6px 0 0 28px">強勢・イントネーション・話す速さ・リズムの点と、余計な区切り・単調な言い方を表示します。発音評価の料金に、評価した音声の長さの分だけ追加料金がかかります（無料枠 F0 で使えるかは未確認）。判定点と復習の評価には入れません。</p>
+    </div>
+    <div class="card settings">
+      <h2 class="set-h">🔊 音声</h2>
       ${outputSelectHTML("out-sel-settings")}
       ${gainSelectHTML("gain-sel-settings")}
+      <p class="note" style="margin:0">今月の読み上げ（Azure）：約${(st().tts && st().tts.month === S.ymd().slice(0, 7) ? st().tts.chars : 0).toLocaleString()}文字 ／ 無料枠 500,000文字。一度聞いた音声は端末に保存され、再生しても文字数は増えません。</p>
       <details id="diag"><summary>音声の診断情報（アプリ v${APP_VERSION}）</summary>
         <pre class="note" id="diag-body" style="white-space:pre-wrap;word-break:break-all;margin:8px 0">${esc(diagText())}</pre>
         <button class="btn" id="diag-refresh">更新</button>
       </details>
+    </div>
+    <div class="card settings">
+      <h2 class="set-h">💬 フィードバック</h2>
+      ${hubOn() ? `<div class="sharebox">
+        <label><input type="checkbox" id="share-toggle" ${st().shareFeedback === true ? "checked" : ""}> 👎 やご意見を作者にも送る（匿名）</label>
+        <p class="note" style="margin:0">送る・送らないは、送るたびに選べます。<button class="linkbtn" id="share-detail">送る内容を見る</button>　端末 ID：<code>${esc((st().instanceId || "").slice(0, 8))}…</code> <button class="linkbtn" id="share-reset">作り直す</button></p>
+      </div>` : ""}
+      <details id="fb-details"><summary>送ったフィードバック</summary>
+        <div class="list fbhist" id="fb-hist" style="margin-top:8px">${fbHistoryHTML()}</div>
+      </details>
+    </div>
+    <div class="card settings">
+      <h2 class="set-h">📦 教材とデータ</h2>
       ${contentHTML()}
-      ${templateHTML()}
       <details ${data.words.length ? "" : "open"}><summary>データ管理</summary>
         <p class="note">最初に入っている単語とシャドーイング用の文を取り込みます。同じIDのデータは上書きされます（復習の記録は消えません）。</p>
         <button class="btn" id="import">初期データを取り込む</button>
       </details>
+    </div>
+    <div class="card settings">
+      <h2 class="set-h">🔄 アプリの更新</h2>
+      ${templateHTML()}
     </div>
   </div>`;
   $("npd").onchange = (e) => { st().newPerDay = +e.target.value; saveSettings(); buildWordQueue(); renderStudy(); };
