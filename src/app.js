@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.28.0";
+const APP_VERSION = "0.29.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -536,13 +536,14 @@ function renderShadow() {
 function prosodyHTML(r) {
   const p = S.prosodyNotes(r);
   if (!p) return "";
-  const pairs = (xs) => xs.map((x) => `<b class="w">${esc(x)}</b>`).join("・");
-  return `<div class="hints" role="note"><p class="note" style="margin:0">リズム・抑揚（${p.score}点、判定点には入れていません）</p><ul>
-    ${p.extra.length ? `<li>余計な区切り：${pairs(p.extra)} <span class="note">（この2語の間で止まっています）</span></li>` : ""}
-    ${p.missing.length ? `<li>区切りが足りない：${pairs(p.missing)} <span class="note">（この2語の間で少し間を置く）</span></li>` : ""}
-    ${p.mono ? `<li>単調な言い方（音の高さの変化が小さい）</li>` : ""}
-    ${p.tips.map((t) => `<li>${esc(t)}</li>`).join("")}
-  </ul></div>`;
+  // 文の中に区切りの目印を入れて1行で見せる（⌒＝止まっている、／＝少し間を置く）
+  const line = (p.nExtra || p.nMissing) ? p.marks.map((m) =>
+    (m.bk === "u" ? `<span class="pb pb-u" title="ここで止まっています">⌒</span>` : m.bk === "m" ? `<span class="pb pb-m" title="ここで少し間を置く">／</span>` : "") + esc(m.w)).join(" ") : "";
+  const legend = [p.nExtra ? "⌒＝ここで止まっている（つなげて言う）" : "", p.nMissing ? "／＝ここで少し間を置く" : ""].filter(Boolean).join("　");
+  return `<div class="hints" role="note"><p class="note" style="margin:0">リズム・抑揚（${p.score}点、判定点には入れていません）</p>
+    ${line ? `<p class="pline" style="margin:4px 0 0">${line}</p><p class="note" style="margin:0">${legend}</p>` : ""}
+    ${p.tips.length ? `<ul>${p.tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : `<p class="note" style="margin:4px 0 0">区切り・抑揚の指摘はありません。</p>`}
+  </div>`;
 }
 
 /* 音の口の形（唇・舌・声）。発音記号だけでは分かりにくいので、近い日本語の音と口の動きで示す。
@@ -1897,15 +1898,51 @@ function renderList() {
     <div class="list">${rows || '<div class="li"><span class="note">まだありません</span></div>'}</div>
   </div>`;
 }
+/* ---------- Azure の費用（v0.29.0） ----------
+   GitHub Actions「Cost report」が1日1回 Cost Management から読んだ値（Table の cost/latest）を出すだけ。アプリは課金 API を呼ばない */
+let costInfo; // undefined＝未読み込み、null＝まだ取得していない
+let costBusy = false;
+async function loadCost() {
+  if (costBusy) return;
+  costBusy = true;
+  try { costInfo = await api("cost"); } catch (e) { costInfo = { loadError: true }; }
+  costBusy = false;
+  if (!$("view-settings").hidden) renderSettings();
+}
+function money(x, cur) {
+  try { return new Intl.NumberFormat("ja-JP", { style: "currency", currency: cur || "JPY", maximumFractionDigits: cur === "JPY" || !cur ? 0 : 2 }).format(x || 0); }
+  catch (e) { return `${(x || 0).toLocaleString()} ${cur || ""}`; }
+}
+function costHTML() {
+  const c = costInfo;
+  if (c === undefined) return `<p class="note" style="margin:0">読み込んでいます…</p>`;
+  if (c && c.loadError) return `<p class="note" style="margin:0">費用を読み込めませんでした。<button class="linkbtn" id="cost-reload">もう一度</button></p>`;
+  if (!c || !c.month) return `<p class="note" style="margin:0">まだ取得していません。GitHub Actions の「Cost report」を設定すると、1日1回ここに表示します（手順は docs/COST.md）。${c && c.error ? `<br>前回の失敗：${esc(c.error)}` : ""}</p>`;
+  const cur = c.currency;
+  const rows = (c.month.services || []).filter((x) => x.cost > 0).map((x) => `<li>${esc(x.name)}：${money(x.cost, cur)}</li>`).join("");
+  const d = new Date(c.at);
+  return `<p style="margin:0"><b style="font-size:20px">${money(c.month.total, cur)}</b> <span class="note">今月（1日から）</span></p>
+      ${rows ? `<ul class="rv" style="margin:0">${rows}</ul>` : `<p class="note" style="margin:0">今月はまだ費用が出ていません（無料枠の範囲など）。</p>`}
+      <p class="note" style="margin:0">先月：${money(c.last && c.last.total, cur)}</p>
+      <p class="note" style="margin:0">取得：${esc(S.ymd(d.getTime()))} ${esc(d.toTimeString().slice(0, 5))}（1日1回）${c.error ? `<br>⚠ 最後の取得に失敗しました：${esc(c.error)}` : ""}</p>
+      <p class="note" style="margin:0">Azure Cost Management の推定額です。税・クレジットは含まず、反映まで数時間〜最大72時間（従量課金）かかることがあります。正式な金額は請求書で確認してください。</p>
+      <button class="linkbtn" id="cost-reload" style="align-self:flex-start">表示を更新</button>`;
+}
+
 /* ---------- 設定タブ（v0.28.0。それまでは一覧タブの下にあった） ---------- */
 function renderSettings() {
   const v = $("view-settings");
+  if (costInfo === undefined) loadCost();
   v.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
     <div class="card settings">
       <h2 class="set-h">📚 学習の量</h2>
       <p class="note" style="margin:-8px 0 0">1日に出す新しい単語・文の数</p>
       <label for="npd">1日の新しい単語 <select id="npd">${[5, 10, 15, 20].map((n) => `<option ${n === st().newPerDay ? "selected" : ""}>${n}</option>`).join("")}</select> 語</label>
       <label for="nsd">1日の新しい文 <select id="nsd">${[3, 5, 8, 10].map((n) => `<option ${n === st().newSentencesPerDay ? "selected" : ""}>${n}</option>`).join("")}</select> 文</label>
+    </div>
+    <div class="card settings">
+      <h2 class="set-h">💴 Azure の費用</h2>
+      ${costHTML()}
     </div>
     <div class="card settings">
       <h2 class="set-h">🗣️ シャドーイング</h2>
@@ -1951,6 +1988,7 @@ function renderSettings() {
   $("nsd").onchange = (e) => { st().newSentencesPerDay = +e.target.value; saveSettings(); buildSentenceQueue(); renderShadow(); };
   $("strict").onchange = (e) => { st().strictness = e.target.value; saveSettings(); renderShadow(); };
   $("prosody").onchange = (e) => { st().prosody = e.target.checked; saveSettings(); };
+  if ($("cost-reload")) $("cost-reload").onclick = () => { costInfo = undefined; renderSettings(); };
   if ($("share-toggle")) {
     $("share-toggle").onchange = (e) => { st().shareFeedback = e.target.checked; st().shareAskedAt = new Date().toISOString(); saveSettings(); };
     $("share-detail").onclick = () => openShareConsent(false);
