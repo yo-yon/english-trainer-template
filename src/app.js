@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.27.0";
+const APP_VERSION = "0.28.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -299,7 +299,7 @@ function renderStudy() {
   const v = $("view-study");
   counts();
   if (!loaded) { v.innerHTML = emptyCard("読み込んでいます", "単語と学習記録を取得しています。"); return; }
-  if (!data.words.length) { v.innerHTML = emptyCard("まだ単語がありません", "「一覧」タブの「データ管理」→「初期データを取り込む」から、単語と文を入れてください。"); return; }
+  if (!data.words.length) { v.innerHTML = emptyCard("まだ単語がありません", "「設定」タブの「データ管理」→「初期データを取り込む」から、単語と文を入れてください。"); return; }
   if (!wCur) { v.innerHTML = emptyCard("今日の単語は終わりです", (wDone ? wDone + "枚を学習しました。" : "") + (wHeld ? `復習がたまっているので、今日の新しい単語（${wHeld}語）はお休みにしました。` : "") + "次はシャドーイングに進みましょう。"); return; }
   const w = wCur, s = data.cards.word[w.id];
   const rev = wMode === "rev";
@@ -459,7 +459,7 @@ function renderShadow() {
   const v = $("view-shadow");
   counts();
   if (!loaded) { v.innerHTML = emptyCard("読み込んでいます", ""); return; }
-  if (!data.sentences.length) { v.innerHTML = emptyCard("まだ文がありません", "「一覧」タブから初期データを取り込んでください。"); return; }
+  if (!data.sentences.length) { v.innerHTML = emptyCard("まだ文がありません", "「設定」タブの「データ管理」から初期データを取り込んでください。"); return; }
   if (!sCur) { v.innerHTML = emptyCard("今日の文は終わりです", (sDone ? sDone + "文を練習しました。" : "") + "仕上げに「練習」をどうぞ。"); return; }
   const s = sCur, c = data.cards.sentence[s.id];
   if (drill && drill.sid !== s.id) drill = null;
@@ -850,7 +850,7 @@ async function retryVariants(SDK, tk, pcm, refText, nbest, onStep) {
 }
 function paConfig(SDK, refText, nbest, prosody) {
   // nBestPhonemeCount（話された音の候補）は基本料金の範囲。
-  // 抑揚（Prosody）は追加料金の機能なので、一覧タブの設定でオンにしたときだけ、シャドーイングの文で使う（v0.27.0、初期設定はオフ）
+  // 抑揚（Prosody）は追加料金の機能なので、設定タブでオンにしたときだけ、シャドーイングの文で使う（v0.27.0、初期設定はオフ）
   const pa = new SDK.PronunciationAssessmentConfig(refText, SDK.PronunciationAssessmentGradingSystem.HundredMark, SDK.PronunciationAssessmentGranularity.Phoneme, true);
   pa.phonemeAlphabet = "IPA";
   if (nbest) pa.nbestPhonemeCount = nbest; // SDK 1.20 以降のプロパティ
@@ -1749,7 +1749,7 @@ function renderQuizMenu() {
     <div class="modes">
       <button class="mode all" data-mode="mix"><span class="t">おまかせ</span><span class="d">4種類をまぜて出題</span></button>
       ${Object.entries(MODES).map(([k, m]) => `<button class="mode" data-mode="${k}"><span class="t">${m.t}</span><span class="d">${m.d}</span></button>`).join("")}
-    </div>` : `<p class="note" style="margin:0">まだ単語がありません。「一覧」タブから初期データを取り込んでください。</p>`}
+    </div>` : `<p class="note" style="margin:0">まだ単語がありません。「設定」タブの「データ管理」から初期データを取り込んでください。</p>`}
     ${q.total ? `<p class="note">これまでの正答率 ${Math.round((q.correct / q.total) * 100)}%（${q.total}問）</p>` : ""}
   </div>`;
 }
@@ -1895,6 +1895,12 @@ function renderList() {
     ${seg("lm", [["words", "単語"], ["sentences", "文"]], listMode)}
     ${seg("lc", [["all", "すべて"], ["tech", listMode === "words" ? "技術" : "セッション"], ["general", listMode === "words" ? "一般" : "会話"]], listCat)}
     <div class="list">${rows || '<div class="li"><span class="note">まだありません</span></div>'}</div>
+  </div>`;
+}
+/* ---------- 設定タブ（v0.28.0。それまでは一覧タブの下にあった） ---------- */
+function renderSettings() {
+  const v = $("view-settings");
+  v.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
     <div class="card settings">
       <label for="npd">1日の新しい単語 <select id="npd">${[5, 10, 15, 20].map((n) => `<option ${n === st().newPerDay ? "selected" : ""}>${n}</option>`).join("")}</select> 語</label>
       <label for="nsd">1日の新しい文 <select id="nsd">${[3, 5, 8, 10].map((n) => `<option ${n === st().newSentencesPerDay ? "selected" : ""}>${n}</option>`).join("")}</select> 文</label>
@@ -1910,8 +1916,8 @@ function renderList() {
       <details id="fb-details"><summary>送ったフィードバック</summary>
         <div class="list fbhist" id="fb-hist" style="margin-top:8px">${fbHistoryHTML()}</div>
       </details>
-      ${outputSelectHTML("out-sel-list")}
-      ${gainSelectHTML("gain-sel-list")}
+      ${outputSelectHTML("out-sel-settings")}
+      ${gainSelectHTML("gain-sel-settings")}
       <details id="diag"><summary>音声の診断情報（アプリ v${APP_VERSION}）</summary>
         <pre class="note" id="diag-body" style="white-space:pre-wrap;word-break:break-all;margin:8px 0">${esc(diagText())}</pre>
         <button class="btn" id="diag-refresh">更新</button>
@@ -1934,26 +1940,31 @@ function renderList() {
     $("share-reset").onclick = () => {
       if (!confirm("端末 ID を作り直しますか？ これまでに作者へ送ったフィードバックと、今後のフィードバックは結び付かなくなります。")) return;
       st().instanceId = crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now();
-      saveSettings(); renderList();
+      saveSettings(); renderSettings();
     };
   }
   $("hide").onchange = (e) => { st().hideText = e.target.checked; saveSettings(); renderShadow(); };
-  bindOutputSelect("out-sel-list", () => { renderList(); renderShadow(); });
-  bindGainSelect("gain-sel-list", () => { renderList(); renderShadow(); });
+  bindOutputSelect("out-sel-settings", () => { renderSettings(); renderShadow(); });
+  bindGainSelect("gain-sel-settings", () => { renderSettings(); renderShadow(); });
   $("diag-refresh").onclick = async () => { await refreshOutputs(); $("diag-body").textContent = diagText(); };
   $("import").onclick = importSeed;
   if ($("content-pull")) {
     $("content-pull").onclick = () => pullContent(false);
     $("content-auto").onchange = (e) => { st().contentAuto = e.target.checked; saveSettings(); };
   }
-  $("tpl-on").onchange = (e) => { st().templateCheck = e.target.checked; saveSettings(); if (e.target.checked) checkTemplate(true); else renderList(); };
+  $("tpl-on").onchange = (e) => { st().templateCheck = e.target.checked; saveSettings(); if (e.target.checked) checkTemplate(true); else renderSettings(); };
   if ($("tpl-check")) $("tpl-check").onclick = () => checkTemplate(true);
   $("fb-details").ontoggle = (e) => { if (e.target.open && !fbHistory) loadFbHistory(); };
+}
+// 一覧・設定のうち、表示中のものだけ描き直す
+function rerenderPanels() {
+  if (!$("view-list").hidden) renderList();
+  if (!$("view-settings").hidden) renderSettings();
 }
 /* ---------- テンプレートの更新のお知らせ（v0.25.0） ----------
    テンプレートから作ったリポジトリには「Sync fork」がなく、更新に気づきにくい。
    公開テンプレートの CHANGELOG.md を1日1回読み、自分の版より新しい版があれば知らせる（読みに行くだけで、こちらからは何も送らない）。
-   一覧タブで止められる（settings.templateCheck = false）。結果は端末に保存（localStorage） */
+   設定タブで止められる（settings.templateCheck = false）。結果は端末に保存（localStorage） */
 const TPL_REPO = "https://github.com/yo-yon/english-trainer-template";
 const TPL_CHANGELOG_RAW = "https://raw.githubusercontent.com/yo-yon/english-trainer-template/main/CHANGELOG.md";
 const TPL_KEY = "et-template";
@@ -1967,7 +1978,7 @@ async function checkTemplate(force) {
   tplInfo = cached;
   if (force || !cached || !(Date.now() - (cached.at || 0) < S.DAY)) {
     tplBusy = true; tplError = "";
-    if (force && !$("view-list").hidden) renderList();
+    if (force && !$("view-settings").hidden) renderSettings();
     try {
       const r = await fetch(TPL_CHANGELOG_RAW, { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
       if (!r.ok) throw new Error(String(r.status));
@@ -1979,10 +1990,10 @@ async function checkTemplate(force) {
   const nw = tplNewer();
   // 新しい版を見つけたら一度だけお知らせ（同じ版では二度出さない）
   if (nw.length && tplInfo.seen !== nw[0].v) {
-    showBanner(`テンプレートに新しい版 v${nw[0].v} があります（いまは v${APP_VERSION}）。取り込み方は「一覧」タブの「テンプレートの更新」にあります。`);
+    showBanner(`テンプレートに新しい版 v${nw[0].v} があります（いまは v${APP_VERSION}）。取り込み方は「設定」タブの「テンプレートの更新」にあります。`);
     tplInfo.seen = nw[0].v; tplSave(tplInfo);
   }
-  if (!$("view-list").hidden) renderList();
+  rerenderPanels();
 }
 function templateHTML() {
   const on = st().templateCheck !== false;
@@ -2040,7 +2051,7 @@ async function pullContent(auto) {
     if (!auto) showBanner(e.status === 409 ? "共通の教材はオフになっています（CONTENT_FEED_URL）。" : "教材の置き場に接続できませんでした。時間をおいてもう一度試してください。");
   } finally {
     contentBusy = false;
-    if (!$("view-list").hidden) renderList();
+    rerenderPanels();
   }
 }
 async function importSeed() {
@@ -2122,7 +2133,7 @@ $("fb-form").addEventListener("submit", async (e) => {
       : "フィードバックを保存しました。ありがとうございます。");
     maybeAskShareAgain();
     fbHistory = null;
-    if (!$("view-list").hidden) renderList();
+    rerenderPanels();
   } catch (x) {
     err("送れませんでした。通信状況を確認して、もう一度送ってください。");
   } finally { send.disabled = false; }
@@ -2161,11 +2172,11 @@ function openShareConsent(again) {
 }
 $("share-form").addEventListener("submit", (e) => {
   const v = e.submitter && e.submitter.value;
-  if (v === "yes") { st().shareFeedback = true; showBanner("ありがとうございます！ 👎 やご意見を、作者にも届けます（設定は「一覧」タブでいつでも変えられます）。"); }
+  if (v === "yes") { st().shareFeedback = true; showBanner("ありがとうございます！ 👎 やご意見を、作者にも届けます（設定は「設定」タブでいつでも変えられます）。"); }
   else if (v === "no") { st().shareFeedback = false; }
   st().shareAskedAt = new Date().toISOString();
   saveSettings();
-  if ($("view-list") && !$("view-list").hidden) renderList();
+  if ($("view-list")) rerenderPanels();
 });
 function maybeAskShare() {
   if (!hubOn() || st().shareFeedback !== undefined) return;
@@ -2181,11 +2192,12 @@ function maybeAskShareAgain() {
 }
 
 /* ---------- タブとクリック ---------- */
-const TABS = ["today", "study", "shadow", "talk", "quiz", "list"];
+const TABS = ["today", "study", "shadow", "talk", "quiz", "list", "settings"];
 function tab(which) {
   for (const t of TABS) { $("tab-" + t).setAttribute("aria-selected", which === t); $("view-" + t).hidden = which !== t; }
   if (which === "today") { if (/^今日の分を終えました/.test($("banner").textContent)) showBanner(""); renderToday(); }
   if (which === "list") renderList();
+  if (which === "settings") renderSettings();
   if (which === "quiz" && sounds) renderSounds();
   else if (which === "quiz" && dict) renderDict();
   else if (which === "quiz" && comp) renderCompose();
@@ -2453,7 +2465,7 @@ async function load() {
   data.settings = { ...defaults, ...(d.settings || {}) };
   // v0.20.0：新しい単語の初期値を10語から5語に。以前の初期値のままの人だけ一度だけ直す（自分で変えた人はそのまま）
   if (!st().wordPlan) {
-    if (st().newPerDay === 10) { st().newPerDay = 5; showBanner("単語の覚え方を変えました：新しい単語は1日5語に（一覧タブで変えられます）。意味は4択で答え、一度覚えた単語は日本語から英語を言う練習になります。"); }
+    if (st().newPerDay === 10) { st().newPerDay = 5; showBanner("単語の覚え方を変えました：新しい単語は1日5語に（設定タブで変えられます）。意味は4択で答え、一度覚えた単語は日本語から英語を言う練習になります。"); }
     st().wordPlan = 2; saveSettings();
   }
   // v0.21.0：覚えた単語の復習に「聞いて意味を選ぶ」を混ぜる。一度だけお知らせする
@@ -2474,7 +2486,7 @@ async function load() {
   renderToday();
   renderStudy();
   if (!$("view-shadow").hidden) renderShadow();
-  if (!$("view-list").hidden) renderList();
+  rerenderPanels();
   counts();
 }
 renderToday();
