@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.26.0";
+const APP_VERSION = "0.27.0";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -11,7 +11,7 @@ const MIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
 /* ---------- 状態 ---------- */
 let data = { words: [], sentences: [], phrases: [], cards: { word: {}, sentence: {}, compose: {}, dict: {} }, settings: {} };
 let loaded = false;
-const defaults = { newPerDay: 5, newSentencesPerDay: 5, composePerDay: 5, dictPerDay: 3, newLog: { date: "", count: 0 }, newSentLog: { date: "", count: 0 }, composeLog: { date: "", count: 0 }, dictLog: { date: "", count: 0 }, quiz: { total: 0, correct: 0 }, hideText: false, strictness: "strict" };
+const defaults = { newPerDay: 5, newSentencesPerDay: 5, composePerDay: 5, dictPerDay: 3, newLog: { date: "", count: 0 }, newSentLog: { date: "", count: 0 }, composeLog: { date: "", count: 0 }, dictLog: { date: "", count: 0 }, quiz: { total: 0, correct: 0 }, hideText: false, strictness: "strict", prosody: false };
 const st = () => data.settings;
 const TALK_GOAL = 1; // 1日の会話の目安（回）。上の「会話」の数は今日の残り
 
@@ -498,7 +498,9 @@ function renderShadow() {
         <div class="sc"><div class="v">${r.acc}</div><div class="k">正確さ</div></div>
         <div class="sc"><div class="v">${r.flu}</div><div class="k">流暢さ</div></div>
         <div class="sc"><div class="v">${r.comp}</div><div class="k">完全さ</div></div>
+        ${r.pros != null ? `<div class="sc"><div class="v">${r.pros}</div><div class="k">リズム・抑揚</div></div>` : ""}
       </div>
+      ${prosodyHTML(r)}
       <div class="pw">${r.words.map((w, i) => { const c = S.wordClass(w, st().strictness); return `<button class="${c}" data-pw="${i}">${MARK[c] ? `<span class="mk" aria-hidden="true">${MARK[c]}</span>` : ""}${esc(w.w)}${w.acc != null && w.err !== "Omission" ? `<small class="note"> ${w.acc}</small>` : ""}</button>`; }).join("")}</div>
       ${fb.hints.length ? `<div class="hints"><p class="note" style="margin:0">改善点</p><ol>${fb.hints.map((t) => `<li>
           <div>${t.kind === "phoneme" ? `<span class="ipa">/${esc(t.ph)}/</span> ` : ""}${t.words.length ? t.words.map((x) => `<b class="w">${esc(x)}</b>`).join("・") : ""}${t.kind === "phoneme" ? `<span class="note">（${t.score}点）</span>` : t.kind === "omit" ? `<span class="note">（言い落とし）</span>` : t.kind === "fluency" ? `<b>流暢さ</b><span class="note">（${r.flu}点）</span>` : ""}</div>
@@ -528,6 +530,19 @@ function renderShadow() {
   if ($("drill-close")) $("drill-close").onclick = () => { drill = null; renderShadow(); };
   if ($("rec-play")) $("rec-play").onclick = playRecDiag;
   bindMyRec(s.text);
+}
+
+/* 抑揚（Prosody）の結果。設定でオンにして、Azure が点を返したときだけ出す（判定点には入れない） */
+function prosodyHTML(r) {
+  const p = S.prosodyNotes(r);
+  if (!p) return "";
+  const pairs = (xs) => xs.map((x) => `<b class="w">${esc(x)}</b>`).join("・");
+  return `<div class="hints" role="note"><p class="note" style="margin:0">リズム・抑揚（${p.score}点、判定点には入れていません）</p><ul>
+    ${p.extra.length ? `<li>余計な区切り：${pairs(p.extra)} <span class="note">（この2語の間で止まっています）</span></li>` : ""}
+    ${p.missing.length ? `<li>区切りが足りない：${pairs(p.missing)} <span class="note">（この2語の間で少し間を置く）</span></li>` : ""}
+    ${p.mono ? `<li>単調な言い方（音の高さの変化が小さい）</li>` : ""}
+    ${p.tips.map((t) => `<li>${esc(t)}</li>`).join("")}
+  </ul></div>`;
 }
 
 /* 音の口の形（唇・舌・声）。発音記号だけでは分かりにくいので、近い日本語の音と口の動きで示す。
@@ -833,11 +848,13 @@ async function retryVariants(SDK, tk, pcm, refText, nbest, onStep) {
   }
   return { out, via, log: log.join("、") };
 }
-function paConfig(SDK, refText, nbest) {
-  // 抑揚（Prosody）は追加料金のため使わない。nBestPhonemeCount（話された音の候補）は基本料金の範囲
+function paConfig(SDK, refText, nbest, prosody) {
+  // nBestPhonemeCount（話された音の候補）は基本料金の範囲。
+  // 抑揚（Prosody）は追加料金の機能なので、一覧タブの設定でオンにしたときだけ、シャドーイングの文で使う（v0.27.0、初期設定はオフ）
   const pa = new SDK.PronunciationAssessmentConfig(refText, SDK.PronunciationAssessmentGradingSystem.HundredMark, SDK.PronunciationAssessmentGranularity.Phoneme, true);
   pa.phonemeAlphabet = "IPA";
   if (nbest) pa.nbestPhonemeCount = nbest; // SDK 1.20 以降のプロパティ
+  if (prosody) pa.enableProsodyAssessment = true; // SDK 1.35 以降。JS ではプロパティ（setter）
   return pa;
 }
 // 送った音声を、発音評価なしでもう一度認識する（診断用）
@@ -933,7 +950,7 @@ async function assessOnce(refText, opts = {}) {
     // 普段は「話し終わった」ボタンで入力を閉じるので、この 3 秒を待つことはない
     cfg.setProperty(SDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, "3000");
     const audio = SDK.AudioConfig.fromStreamInput(push);
-    const pa = paConfig(SDK, refText, opts.nbestPhonemes);
+    const pa = paConfig(SDK, refText, opts.nbestPhonemes, opts.prosody);
     recognizer = new SDK.SpeechRecognizer(cfg, audio);
     pa.applyTo(recognizer);
     // 1文30秒以内。万一終わらないときは 35 秒で入力を閉じて結果を受け取る
@@ -1003,14 +1020,14 @@ async function assessOnce(refText, opts = {}) {
 async function startAssessment() {
   if (recording || !sCur) return;
   const target = sCur;
-  const r = await assessOnce(target.text);
+  const r = await assessOnce(target.text, { prosody: st().prosody === true });
   if (r && sCur === target) {
     const j = S.judgeScore(r, st().strictness);
     r.judge = j.score; r.ngCount = j.ng;
     sResult = r; drill = null; openWord = r.words.findIndex((w) => S.wordClass(w, st().strictness) === "ng");
     // 「今回の最高」は判定点で比べる。同点なら要練習の単語が少ない方
     if (sBest == null || r.judge > sBest || (r.judge === sBest && r.ngCount < sBestNg)) { sBest = r.judge; sBestNg = r.ngCount; }
-    queueSave(() => api("attempts", { method: "POST", body: JSON.stringify({ sentenceId: target.id, text: target.text, pron: r.pron, judge: r.judge, strictness: st().strictness, acc: r.acc, flu: r.flu, comp: r.comp, recognized: r.recognized, words: r.words }) }));
+    queueSave(() => api("attempts", { method: "POST", body: JSON.stringify({ sentenceId: target.id, text: target.text, pron: r.pron, judge: r.judge, strictness: st().strictness, acc: r.acc, flu: r.flu, comp: r.comp, ...(r.pros != null ? { pros: r.pros, pronAz: r.pronAz } : {}), recognized: r.recognized, words: r.words }) }));
   }
   renderShadow();
 }
@@ -1887,6 +1904,8 @@ function renderList() {
         <p class="note" style="margin:0">送る・送らないは、送るたびに選べます。<button class="linkbtn" id="share-detail">送る内容を見る</button>　端末 ID：<code>${esc((st().instanceId || "").slice(0, 8))}…</code> <button class="linkbtn" id="share-reset">作り直す</button></p>
       </div>` : ""}
       <label><input type="checkbox" id="hide" ${st().hideText ? "checked" : ""}> シャドーイングで、評価前は文をぼかす（聞き取り重視）</label>
+      <label><input type="checkbox" id="prosody" ${st().prosody === true ? "checked" : ""}> シャドーイングで、リズム・抑揚も評価する（Azure の追加料金）</label>
+      <p class="note" style="margin:-6px 0 0">強勢・イントネーション・話す速さ・リズムの点と、余計な区切り・単調な言い方を表示します。発音評価の料金に、評価した音声の長さの分だけ追加料金がかかります（無料枠 F0 で使えるかは未確認）。判定点と復習の評価には入れません。</p>
       <p class="note" style="margin:0">今月の読み上げ（Azure）：約${(st().tts && st().tts.month === S.ymd().slice(0, 7) ? st().tts.chars : 0).toLocaleString()}文字 ／ 無料枠 500,000文字。一度聞いた音声は端末に保存され、再生しても文字数は増えません。</p>
       <details id="fb-details"><summary>送ったフィードバック</summary>
         <div class="list fbhist" id="fb-hist" style="margin-top:8px">${fbHistoryHTML()}</div>
@@ -1908,6 +1927,7 @@ function renderList() {
   $("npd").onchange = (e) => { st().newPerDay = +e.target.value; saveSettings(); buildWordQueue(); renderStudy(); };
   $("nsd").onchange = (e) => { st().newSentencesPerDay = +e.target.value; saveSettings(); buildSentenceQueue(); renderShadow(); };
   $("strict").onchange = (e) => { st().strictness = e.target.value; saveSettings(); renderShadow(); };
+  $("prosody").onchange = (e) => { st().prosody = e.target.checked; saveSettings(); };
   if ($("share-toggle")) {
     $("share-toggle").onchange = (e) => { st().shareFeedback = e.target.checked; st().shareAskedAt = new Date().toISOString(); saveSettings(); };
     $("share-detail").onclick = () => openShareConsent(false);

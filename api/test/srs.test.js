@@ -464,3 +464,43 @@ test("会話の道具：使えた表現を拾う。似た語の別の使い方�
   assert.equal(S.isClarify("That sounds great."), false);
   assert.ok(S.CONV_TOOLS.every((t) => S.TOOL_KINDS[t.kind] && t.en && t.ja));
 });
+
+test("parsePron は抑揚（Prosody）があっても総合点を抑揚なしの式で出し直す", () => {
+  const fb = (u, m, mono) => ({ Prosody: { Break: { UnexpectedBreak: { Confidence: u }, MissingBreak: { Confidence: m } }, Intonation: { ErrorTypes: mono ? ["Monotone"] : [] } } });
+  const json = {
+    NBest: [{
+      Display: "I want to go there.",
+      PronunciationAssessment: { AccuracyScore: 90, FluencyScore: 80, CompletenessScore: 100, ProsodyScore: 62.4, PronScore: 79 },
+      Words: [
+        { Word: "i", PronunciationAssessment: { AccuracyScore: 95, ErrorType: "None", Feedback: fb(0, 0, true) } },
+        { Word: "want", PronunciationAssessment: { AccuracyScore: 92, ErrorType: "None", Feedback: fb(0.1, 0.2, true) } },
+        { Word: "to", PronunciationAssessment: { AccuracyScore: 90, ErrorType: "None", Feedback: fb(0.9, 0, true) } },
+        { Word: "go", PronunciationAssessment: { AccuracyScore: 88, ErrorType: "None", Feedback: fb(0, 0.8, true) } },
+        { Word: "there", PronunciationAssessment: { AccuracyScore: 85, ErrorType: "None", Feedback: fb(0.75, 0, true) } },
+      ],
+    }],
+  };
+  const r = S.parsePron(json);
+  // 抑揚なしの読み上げの式：0.6×80 + 0.2×90 + 0.2×100 = 86（Azure の 79 ではない）
+  assert.equal(r.pron, 86);
+  assert.equal(r.pronAz, 79);
+  assert.equal(r.pros, 62);
+  assert.equal(r.words[2].bk, "u");
+  assert.equal(r.words[3].bk, "m");
+  assert.equal(r.words[4].bk, undefined); // 0.75 ちょうどは区切りとしない（0.75 を超えたとき）
+  const p = S.prosodyNotes(r);
+  assert.deepEqual(p.extra, ["want to"]);
+  assert.deepEqual(p.missing, ["to go"]);
+  assert.equal(p.mono, true);
+  assert.equal(p.level, "mid");
+  assert.equal(p.tips.length, 3);
+});
+
+test("抑揚を使わないときは、これまでどおり（pros なし・prosodyNotes は null）", () => {
+  const json = { NBest: [{ PronunciationAssessment: { AccuracyScore: 90, FluencyScore: 80, CompletenessScore: 100, PronScore: 86.2 }, Words: [{ Word: "hi", PronunciationAssessment: { AccuracyScore: 90, ErrorType: "None" } }] }] };
+  const r = S.parsePron(json);
+  assert.equal(r.pron, 86);
+  assert.equal("pros" in r, false);
+  assert.equal("bk" in r.words[0], false);
+  assert.equal(S.prosodyNotes(r), null);
+});

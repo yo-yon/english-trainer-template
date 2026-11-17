@@ -423,6 +423,45 @@
     return { verdict, hints };
   }
 
+  /* ---------- 抑揚（Prosody）：設定でオンにしたときだけ返る ----------
+     単語ごとの Feedback.Prosody.Break の UnexpectedBreak・MissingBreak の Confidence と、Intonation.ErrorTypes の Monotone。
+     区切りの判定の目安は Microsoft Learn の推奨値 0.75（Break の ErrorTypes は今の版では返らないため、Confidence で判定する） */
+  const BREAK_TH = 0.75;
+  function prosodyWord(pr) {
+    const out = {};
+    const br = pr.Break || {};
+    const u = br.UnexpectedBreak && br.UnexpectedBreak.Confidence;
+    const m = br.MissingBreak && br.MissingBreak.Confidence;
+    if (u != null && u > BREAK_TH) out.bk = "u";
+    else if (m != null && m > BREAK_TH) out.bk = "m";
+    if (((pr.Intonation && pr.Intonation.ErrorTypes) || []).includes("Monotone")) out.mono = true;
+    return out;
+  }
+  /**
+   * 抑揚の結果を、画面に出す短い助言にする（AI は使わない）。抑揚の点が無いときは null。
+   * 余計な区切り：その単語の「前」で止まっている。区切り不足：その単語の前で、ひと息置くとよい（句読点の後など）
+   * @returns {{score:number, level:string, mono:boolean, extra:string[], missing:string[], tips:string[]}|null}
+   */
+  function prosodyNotes(r) {
+    if (!r || r.pros == null) return null;
+    const words = (r.words || []).filter((w) => w.err !== "Omission" && w.err !== "Insertion");
+    const extra = [], missing = [];
+    words.forEach((w, i) => {
+      if (i === 0) return; // 文の最初の単語の「前」の区切りは意味がない
+      const pair = `${words[i - 1].w} ${w.w}`;
+      if (w.bk === "u") extra.push(pair);
+      else if (w.bk === "m") missing.push(pair);
+    });
+    const mono = words.some((w) => w.mono);
+    const tips = [];
+    if (mono) tips.push("音の高さがほぼ平らです。大事な単語（名詞・動詞）を少し高く・長く・強く言い、文の最後は下げる");
+    if (extra.length) tips.push("途中で止まっています。意味のまとまりは一息で、弱い語（to・of・the など）は前後の語にくっつける");
+    if (missing.length) tips.push("区切りが足りません。カンマや意味の切れ目で、ほんの少し間を置く");
+    if (!tips.length && r.pros < 80) tips.push("お手本の強弱と高さの上がり下がりを、少し大げさにまねる。「ゆっくり」で強く読む単語を確かめてから話すと効果的");
+    const level = r.pros >= 80 ? "ok" : r.pros >= 60 ? "mid" : "ng";
+    return { score: r.pros, level, mono, extra: extra.slice(0, 3), missing: missing.slice(0, 3), tips };
+  }
+
   /** Speech SDK の JSON 結果を、画面表示と保存に使う形に整える */
   function parsePron(json) {
     const nb = json && json.NBest && json.NBest[0];
@@ -430,6 +469,7 @@
     const pa = nb.PronunciationAssessment || {};
     const words = (nb.Words || []).map((w) => {
       const a = w.PronunciationAssessment || {};
+      const pr = (a.Feedback && a.Feedback.Prosody) || null;
       return {
         w: w.Word,
         acc: a.AccuracyScore != null ? Math.round(a.AccuracyScore) : null,
@@ -442,11 +482,22 @@
           if (top && top.Phoneme && top.Phoneme !== p.Phoneme) e.push(top.Phoneme);
           return e;
         }),
+        // 抑揚（Prosody）を有効にしたときだけ：この単語の前の区切り（u＝余計な区切り、m＝区切りが足りない）と、単調な言い方
+        ...(pr ? prosodyWord(pr) : {}),
       };
     });
+    // 抑揚を有効にすると Azure の総合点（PronScore）に抑揚が入る。採点（判定点・復習）が変わらないよう、
+    // 抑揚なしの式（読み上げ：低い順に 0.6・0.2・0.2）で総合点を出し直す。Azure の点は pronAz に残す
+    const pros = pa.ProsodyScore != null ? Math.round(pa.ProsodyScore) : null;
+    let pron = pa.PronScore ?? 0;
+    if (pros != null && pa.AccuracyScore != null && pa.FluencyScore != null && pa.CompletenessScore != null) {
+      const s3 = [pa.AccuracyScore, pa.FluencyScore, pa.CompletenessScore].sort((x, y) => x - y);
+      pron = 0.6 * s3[0] + 0.2 * s3[1] + 0.2 * s3[2];
+    }
     return {
       recognized: nb.Display || json.DisplayText || "",
-      pron: Math.round(pa.PronScore ?? 0),
+      pron: Math.round(pron),
+      ...(pros != null ? { pros, pronAz: Math.round(pa.PronScore ?? 0) } : {}),
       acc: Math.round(pa.AccuracyScore ?? 0),
       flu: Math.round(pa.FluencyScore ?? 0),
       comp: Math.round(pa.CompletenessScore ?? 0),
@@ -845,5 +896,5 @@
     return BADGES.map(([id, name, desc, key, goal]) => { const cur = Math.max(0, +((c || {})[key]) || 0); return { id, name, desc, cur: Math.min(cur, goal), goal, done: cur >= goal }; });
   }
 
-  return { retentionWeeks, habitMonth, BADGES, badgeStatus, cmpVersion, parseChangelog, newerVersions, addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  return { retentionWeeks, habitMonth, BADGES, badgeStatus, cmpVersion, parseChangelog, newerVersions, addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, prosodyNotes, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });
