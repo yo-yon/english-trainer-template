@@ -438,28 +438,27 @@
     return out;
   }
   /**
-   * 抑揚の結果を、画面に出す短い助言にする（AI は使わない）。抑揚の点が無いときは null。
-   * 余計な区切り：その単語の「前」で止まっている。区切り不足：その単語の前で、ひと息置くとよい（句読点の後など）
-   * @returns {{score:number, level:string, mono:boolean, extra:string[], missing:string[], tips:string[]}|null}
+   * 抑揚の結果を、画面に出す形にする（AI は使わない）。抑揚の点が無いときは null。
+   * marks：文の単語の並び。bk="u" はその単語の「前」で止まっている（つなげる）、bk="m" はその単語の前で少し間を置く
+   * tips：直し方は区切りで1つ、単調で1つまで（同じ種類の助言を重ねない）
+   * @returns {{score:number, level:string, mono:boolean, marks:{w:string,bk?:string}[], nExtra:number, nMissing:number, tips:string[]}|null}
    */
   function prosodyNotes(r) {
     if (!r || r.pros == null) return null;
     const words = (r.words || []).filter((w) => w.err !== "Omission" && w.err !== "Insertion");
-    const extra = [], missing = [];
-    words.forEach((w, i) => {
-      if (i === 0) return; // 文の最初の単語の「前」の区切りは意味がない
-      const pair = `${words[i - 1].w} ${w.w}`;
-      if (w.bk === "u") extra.push(pair);
-      else if (w.bk === "m") missing.push(pair);
-    });
+    // 文の最初の単語の「前」の区切りは意味がないので消す
+    const marks = words.map((w, i) => (i > 0 && (w.bk === "u" || w.bk === "m") ? { w: w.w, bk: w.bk } : { w: w.w }));
+    const nExtra = marks.filter((m) => m.bk === "u").length;
+    const nMissing = marks.filter((m) => m.bk === "m").length;
     const mono = words.some((w) => w.mono);
     const tips = [];
-    if (mono) tips.push("音の高さがほぼ平らです。大事な単語（名詞・動詞）を少し高く・長く・強く言い、文の最後は下げる");
-    if (extra.length) tips.push("途中で止まっています。意味のまとまりは一息で、弱い語（to・of・the など）は前後の語にくっつける");
-    if (missing.length) tips.push("区切りが足りません。カンマや意味の切れ目で、ほんの少し間を置く");
+    if (nExtra && nMissing) tips.push("⌒ の所はつなげて一息で言い、／ の所で少しだけ間を置く（止まる場所を、意味の切れ目に移す）");
+    else if (nExtra) tips.push("⌒ の所はつなげて一息で言う。弱い語（to・of・the など）は前後の語にくっつける");
+    else if (nMissing) tips.push("／ の所で、ほんの少し間を置く（カンマや意味の切れ目）");
+    if (mono) tips.push("音の高さがほぼ平らです（単調）。大事な単語（名詞・動詞）を少し高く・長く・強く言い、文の最後は下げる");
     if (!tips.length && r.pros < 80) tips.push("お手本の強弱と高さの上がり下がりを、少し大げさにまねる。「ゆっくり」で強く読む単語を確かめてから話すと効果的");
     const level = r.pros >= 80 ? "ok" : r.pros >= 60 ? "mid" : "ng";
-    return { score: r.pros, level, mono, extra: extra.slice(0, 3), missing: missing.slice(0, 3), tips };
+    return { score: r.pros, level, mono, marks, nExtra, nMissing, tips };
   }
 
   /** Speech SDK の JSON 結果を、画面表示と保存に使う形に整える */

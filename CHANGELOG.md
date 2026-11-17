@@ -2,6 +2,15 @@
 
 更新の取り込み方は [docs/UPDATING.md](docs/UPDATING.md) を見てください。
 
+## 0.29.0（2026-11-18）
+
+変わったファイル：`src/app.js`、`src/srs.js`、`src/style.css`、`api/src/functions/index.js`、`api/test/srs.test.js`、新規 `.github/workflows/cost-report.yml`・`tools/cost.mjs`・`tools/test/cost.test.mjs`・`docs/COST.md`、`tools/package.json`
+
+**更新するときの注意**：追加の Azure リソースや環境変数はありません。費用の表示を使うときだけ、[docs/COST.md](docs/COST.md) の手順（アプリの登録・フェデレーション資格情報・Cost Management Reader・GitHub の Secrets）が必要です。設定しなければ「Cost report」は何もしないで終わります。
+
+- **Azure の費用（任意）**：「設定」タブに「💴 Azure の費用」を追加。GitHub Actions「Cost report」が1日1回、Azure Cost Management から今月・先月の費用（サービス別）を読んで表示します。Azure のパスワード（クライアント シークレット）は作らず、OpenID Connect と費用を見るだけの権限で取得します
+- **リズム・抑揚の表示**：区切りを文の中に目印で1行に表示するようにしました（⌒＝ここで止まっている、／＝ここで少し間を置く）。直し方は最大2つにまとめました
+
 ## 0.28.0（2026-11-17）
 
 変わったファイル：`src/app.js`、`src/index.html`、`src/style.css`

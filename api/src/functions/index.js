@@ -401,6 +401,23 @@ app.http("phrase", {
 
 /* ---------- フィードバック（👎・ご意見・要望） ---------- */
 const FB_KINDS = new Set(["content", "app"]);
+/* Azure の費用（v0.29.0）：GitHub Actions「Cost report」が1日1回 Cost Management から読んで書いた cost/latest を返すだけ。
+   ここでは Azure の課金 API を呼ばない（SWA Free の API はマネージド ID が使えず、資格情報を持たせないため） */
+app.http("cost", {
+  route: "cost",
+  methods: ["GET"],
+  authLevel: "anonymous",
+  handler: async (request, context) => {
+    const denied = requireOwner(request);
+    if (denied) return denied;
+    try {
+      return { jsonBody: (await getOne("cost", "latest")) || null, headers: { "Cache-Control": "no-store" } };
+    } catch (e) {
+      return fail(context, e);
+    }
+  },
+});
+
 app.http("feedback", {
   route: "feedback",
   methods: ["GET", "POST"],

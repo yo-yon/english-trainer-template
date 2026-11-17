@@ -1,0 +1,67 @@
+# Azure の費用：Cost Management の Query API で今月・先月の費用（サービス別）を読み、Table の cost/latest に書く。
+# アプリの「設定」タブ →「Azure の費用」に表示される。手順は docs/COST.md。
+# サインインは OpenID Connect（フェデレーション資格情報）なので、Azure のパスワード（クライアント シークレット）は使わない。
+# AZURE_CLIENT_ID が未設定なら何もしないで終わる。
+name: Cost report
+
+on:
+  schedule:
+    - cron: "37 20 * * *" # 毎日 5:37（日本時間）。Microsoft Learn は1日1回までを推奨
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OpenID Connect のトークンを取るため
+
+jobs:
+  cost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 設定の確認
+        id: cfg
+        env:
+          CID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -z "$CID" ]; then
+            echo "::notice::AZURE_CLIENT_ID が未設定のため、費用は取得しませんでした（docs/COST.md の手順を参照）"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.cfg.outputs.skip != '1'
+
+      - uses: actions/setup-node@v7
+        if: steps.cfg.outputs.skip != '1'
+        with:
+          node-version: 22
+
+      - name: Azure にサインイン（OpenID Connect）
+        if: steps.cfg.outputs.skip != '1'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: アクセストークンを取る
+        if: steps.cfg.outputs.skip != '1'
+        run: |
+          tok=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
+          echo "::add-mask::$tok"
+          echo "ARM_TOKEN=$tok" >> "$GITHUB_ENV"
+
+      - name: 依存パッケージを入れる
+        if: steps.cfg.outputs.skip != '1'
+        working-directory: tools
+        run: npm install --no-audit --no-fund
+
+      - name: 費用を取得して Table に書く
+        if: steps.cfg.outputs.skip != '1'
+        working-directory: tools
+        env:
+          TABLE_ACCOUNT_URL: ${{ secrets.TABLE_ACCOUNT_URL }}
+          TABLE_SAS: ${{ secrets.TABLE_SAS }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          COST_SCOPES: ${{ vars.COST_SCOPES }}
+        run: node cost.mjs

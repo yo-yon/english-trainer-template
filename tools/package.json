@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "週次レポート・教材の反映・フィードバックの対応済み化（GitHub Actions から実行）",
+  "description": "週次レポート・教材の反映・フィードバックの対応済み化・費用の取得（GitHub Actions から実行）",
   "scripts": {
     "report": "node report.mjs",
     "sync-content": "node sync-content.mjs",
-    "close-feedback": "node close-feedback.mjs"
+    "close-feedback": "node close-feedback.mjs",
+    "cost": "node cost.mjs",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@azure/data-tables": "^13.3.2"

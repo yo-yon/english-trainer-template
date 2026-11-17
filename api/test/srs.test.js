@@ -489,11 +489,15 @@ test("parsePron は抑揚（Prosody）があっても総合点を抑揚なしの
   assert.equal(r.words[3].bk, "m");
   assert.equal(r.words[4].bk, undefined); // 0.75 ちょうどは区切りとしない（0.75 を超えたとき）
   const p = S.prosodyNotes(r);
-  assert.deepEqual(p.extra, ["want to"]);
-  assert.deepEqual(p.missing, ["to go"]);
+  // 区切りは文の中の目印として返す（to の前で止まっている、go の前で少し間を置く）
+  assert.deepEqual(p.marks.map((m) => m.bk || ""), ["", "", "u", "m", ""]);
+  assert.equal(p.nExtra, 1);
+  assert.equal(p.nMissing, 1);
   assert.equal(p.mono, true);
   assert.equal(p.level, "mid");
-  assert.equal(p.tips.length, 3);
+  // 区切りの助言は1つにまとめ、単調の助言と合わせて2つまで
+  assert.equal(p.tips.length, 2);
+  assert.match(p.tips[0], /⌒.*／/);
 });
 
 test("抑揚を使わないときは、これまでどおり（pros なし・prosodyNotes は null）", () => {
@@ -503,4 +507,16 @@ test("抑揚を使わないときは、これまでどおり（pros なし・pro
   assert.equal("pros" in r, false);
   assert.equal("bk" in r.words[0], false);
   assert.equal(S.prosodyNotes(r), null);
+});
+
+test("抑揚：区切り不足が続いても助言は1つ、文の最初の単語の前の区切りは無視", () => {
+  const r = { pros: 77, words: [
+    { w: "you", bk: "m" }, { w: "don't", bk: "m" }, { w: "have", bk: "m" }, { w: "to", bk: "m" },
+    { w: "worry", err: "None" }, { w: "about", bk: "u" }, { w: "it" },
+  ] };
+  const p = S.prosodyNotes(r);
+  assert.deepEqual(p.marks.map((m) => m.bk || ""), ["", "m", "m", "m", "", "u", ""]);
+  assert.equal(p.nMissing, 3);
+  assert.equal(p.tips.length, 1);
+  assert.equal(S.prosodyNotes({ pros: 90, words: [{ w: "hi" }] }).tips.length, 0);
 });
