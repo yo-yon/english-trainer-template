@@ -785,5 +785,65 @@
   /** 今の版より新しい版だけ（新しい順） */
   const newerVersions = (list, current) => (list || []).filter((x) => cmpVersion(x.v, current) > 0).sort((a, b) => cmpVersion(b.v, a.v));
 
-  return { cmpVersion, parseChangelog, newerVersions, addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  /* ---------- 記録とバッジ（v0.26.0） ---------- */
+  /** 直近 n 週（古い順）の定着率：[{ week, n, ok, rate }]（回数 0 の週は rate null） */
+  function retentionWeeks(log, n = 4, today) {
+    const out = [];
+    const last = weekOf(today);
+    for (let i = n - 1; i >= 0; i--) {
+      const wk = addDays(last, -7 * i), b = (log || {})[wk] || {};
+      let cnt = 0, ok = 0;
+      for (const x of Object.values(b)) { cnt += x.n || 0; ok += x.ok || 0; }
+      out.push({ week: wk, n: cnt, ok, rate: cnt ? Math.round((ok / cnt) * 100) : null });
+    }
+    return out;
+  }
+  /**
+   * 月のカレンダー（月曜始まり）。ym："YYYY-MM"。セル：{ date, day, inMonth, level }
+   * level：done（1日分）・part（半分以上）・low（少し）・rest（お休み券）・miss・today・future・none（記録を始める前）
+   */
+  function habitMonth(habit, ym, today, scan) {
+    const h = habit || {}, days = h.days || {}, sc = scan || habitScan(h, today);
+    const first = (h.anchor && h.anchor.date) || Object.keys(days).sort()[0] || today;
+    const start = ym + "-01";
+    const end = addDays(addDays(start, 31).slice(0, 7) + "-01", -1);
+    const cells = [];
+    for (let d = weekOf(start); d <= end || cells.length % 7; d = addDays(d, 1)) {
+      const x = days[d];
+      let level;
+      if (d > today) level = "future";
+      else if (x && x.c) level = "done";
+      else if (d === today) level = "today";
+      else if (sc.states[d] === "rest") level = "rest";
+      else if (x && (x.w || x.s || x.t)) level = (x.p || 0) >= 50 ? "part" : "low";
+      else if (d < first) level = "none";
+      else level = "miss";
+      cells.push({ date: d, day: +d.slice(8), inMonth: d.slice(0, 7) === ym, level });
+    }
+    return cells;
+  }
+  /**
+   * 実績バッジ。量ではなく「続けた・定着した・使えた」を数える。c：{ best, cleared, mature, talks, tools, clarify, phrases, retBest, weekly }
+   * 返り値：[{ id, name, desc, cur, goal, done }]
+   */
+  const BADGES = [
+    ["first", "はじめの1日", "1日分を初めて達成する", "cleared", 1],
+    ["streak7", "1週間つづいた", "最長の連続日数が7日", "best", 7],
+    ["streak30", "30日つづいた", "最長の連続日数が30日", "best", 30],
+    ["streak100", "100日つづいた", "最長の連続日数が100日", "best", 100],
+    ["mature50", "50語が定着", "次の復習が1週間以上先の単語が50語", "mature", 50],
+    ["mature200", "200語が定着", "次の復習が1週間以上先の単語が200語", "mature", 200],
+    ["ret80", "定着率80%", "1週間の定着率が80%以上（10回以上の復習で）", "retBest", 80],
+    ["talk10", "会話10回", "会話を振り返りまで10回", "talks", 10],
+    ["talk50", "会話50回", "会話を振り返りまで50回", "talks", 50],
+    ["clarify", "聞き返せた", "相手が少し難しい言い方をした場面で聞き返す", "clarify", 1],
+    ["tools10", "会話の道具10回", "聞き返し・つなぎの表現を会話で10回使う", "tools", 10],
+    ["phrase30", "フレーズ帳30", "フレーズ帳に30件保存する", "phrases", 30],
+    ["weekly4", "今週のまとめ4回", "今週のまとめを4週分やる", "weekly", 4],
+  ];
+  function badgeStatus(c) {
+    return BADGES.map(([id, name, desc, key, goal]) => { const cur = Math.max(0, +((c || {})[key]) || 0); return { id, name, desc, cur: Math.min(cur, goal), goal, done: cur >= goal }; });
+  }
+
+  return { retentionWeeks, habitMonth, BADGES, badgeStatus, cmpVersion, parseChangelog, newerVersions, addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });

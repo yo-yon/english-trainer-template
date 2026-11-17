@@ -253,14 +253,50 @@ details.guide[open] summary{margin-bottom:4px}
 .sumgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;text-align:left}
 .sumgrid>div{display:flex;flex-direction:column;background:var(--bg);border-radius:10px;padding:8px 12px}
 .sumgrid b{font-size:17px}
-/* PC：今日の画面だけ広げ、左にリング、右に連続日数。ほかのタブは今までの幅 */
+/* スマホ：連続日数 → 今日のリング → カレンダー → 定着率・バッジ（v0.26.0） */
+.today-side{display:contents}
+.today .streak{order:1}.today-main{order:2}.today .cal{order:3}.today-more{order:4}
+.today-more{display:flex;flex-direction:column;gap:14px;min-width:0}
+/* PC：今日の画面だけ広げ、左にリング・定着率・バッジ、右に連続日数とカレンダー。ほかのタブは今までの幅 */
 @media (min-width:900px){
   .wrap{max-width:960px}
   .wrap>section:not(#view-today){width:100%;max-width:600px;margin-inline:auto}
   .today{grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start}
-  .today .streak{grid-column:2;grid-row:1}
+  .today-side{display:flex;flex-direction:column;gap:14px;grid-column:2;grid-row:1 / span 2;min-width:0}
   .today-main{grid-column:1;grid-row:1}
+  .today-more{grid-column:1;grid-row:2}
 }
 
 /* テンプレートの更新のお知らせ（v0.25.0）：ボタン風のリンク */
 a.btn{text-decoration:none}
+
+/* 記録のカレンダー・定着率の推移・実績バッジ（v0.26.0） */
+.cal{gap:10px!important}
+.cal .iconbtn{width:36px;height:36px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:18px;cursor:pointer}
+.cal .iconbtn[disabled]{opacity:.35;cursor:default}
+.calgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.calh{text-align:center;font-size:11px}
+.calc{position:relative;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-variant-numeric:tabular-nums;box-sizing:border-box;background:var(--bg);color:var(--muted)}
+.calc.done{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.calc.part{background:color-mix(in srgb,var(--accent) 55%,var(--surface));color:var(--ink)}
+.calc.low{background:color-mix(in srgb,var(--accent) 22%,var(--surface));color:var(--ink)}
+.calc.rest{border:1px dashed var(--muted);color:var(--ink)}
+.calc.today{border:2px solid var(--accent);color:var(--ink);font-weight:700}
+.calc.future{background:var(--surface);border:1px solid var(--line)}
+.calc.none{background:transparent}
+.calc.out{opacity:.4}
+.callegend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px}
+.callegend span{display:flex;align-items:center;gap:4px}
+.callegend i.calc{display:inline-block;width:12px;height:12px;border-radius:3px}
+.trend{display:grid;grid-template-columns:4.5em 1fr 3em;gap:10px;align-items:center}
+.trend .bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden}
+.trend .bar i{display:block;height:100%;background:var(--accent);border-radius:5px}
+.trend b{text-align:right;font-variant-numeric:tabular-nums}
+.badges{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.badge{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:10px;line-height:1.45}
+.badge .grow{flex:1;min-width:0}
+.badge .bdg{width:28px;height:28px;border-radius:50%;flex:none;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center}
+.badge .bdg svg{width:16px;height:16px}
+.badge.on .bdg{background:var(--accent);border:0;color:var(--accent-ink)}
+.badge:not(.on){color:var(--muted)}
+.badge.new{border-color:var(--accent)}
