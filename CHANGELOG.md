@@ -2,6 +2,16 @@
 
 更新の取り込み方は [docs/UPDATING.md](docs/UPDATING.md) を見てください。
 
+## 0.29.1（2026-11-18）
+
+変わったファイル：`src/app.js`、`src/srs.js`、`api/src/roleplay.js`、`api/src/functions/index.js`、`api/test/roleplay.test.js`
+
+**更新するときの注意**：追加の Azure リソースや環境変数はありません。会話で訳が抜けた返事の「訳を見る」を押したときだけ、AI の呼び出しが1回増えます（会話の1日の回数に数えます）。
+
+- **数字を含む文の発音評価**：「I can make it by 7:00.」の「7:00」などが、正しく言っても言い落とし扱いになっていたのを直しました。数字を英語の読み方（seven o'clock、two thirty、two oh four など）に直してから、お手本の音声と採点に使います。文の下に「読み方」を表示します
+- **改善点の「〇〇を録音して練習」**：「204」「2:30」のような数字の語で、ボタンを押しても何も起きなかったのを直しました
+- **会話の訳**：AI の返事に訳が付かなかったとき「訳を見る」が出なかったのを直しました。いつも「訳を見る」を出し、訳がないときは押したときに作ります
+
 ## 0.29.0（2026-11-18）
 
 変わったファイル：`src/app.js`、`src/srs.js`、`src/style.css`、`api/src/functions/index.js`、`api/test/srs.test.js`、新規 `.github/workflows/cost-report.yml`・`tools/cost.mjs`・`tools/test/cost.test.mjs`・`docs/COST.md`、`tools/package.json`

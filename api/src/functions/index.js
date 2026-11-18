@@ -214,7 +214,7 @@ app.http("judge", {
 });
 
 /* ---------- 会話ロールプレイ（Phase 2a） ----------
-   action: turn（相手役の返事）／review（振り返り。会話の記録も保存）／hint（日本語→英語）
+   action: turn（相手役の返事）／review（振り返り。会話の記録も保存）／hint（日本語→英語）／ja（訳が抜けた返事の訳）
    使いすぎ防止のため、日本時間の1日あたりの回数に上限を設ける（ROLEPLAY_DAILY_LIMIT、既定 60） */
 app.http("roleplay", {
   route: "roleplay",

@@ -93,3 +93,12 @@ test("聞き返しのきっかけ：challenge のときだけ指示を足す。�
   assert.match(ch, /less common word/);
   assert.doesNotMatch(R.prepare({ action: "turn", scene, history: h, challenge: "yes" }).messages[0].content, /less common word/);
 });
+
+test("ja：訳が抜けた返事の訳を作る。日本語を含まない出力は捨てる", () => {
+  const p = R.prepare({ action: "ja", scene, history: H("Hi! Anything I can help with?"), text: "Thanks, that should be fine." });
+  assert.ifError(p.error);
+  assert.match(p.messages[1].content, /Thanks, that should be fine\./);
+  assert.deepEqual(R.cleanJa({ ja: "ありがとう、それで大丈夫です。" }), { ja: "ありがとう、それで大丈夫です。" });
+  assert.deepEqual(R.cleanJa({ ja: "Thanks" }), { ja: null });
+  assert.equal(R.prepare({ action: "ja", scene, history: [], text: "" }).error, "text");
+});

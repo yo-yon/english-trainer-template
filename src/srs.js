@@ -504,8 +504,42 @@
     };
   }
 
+  /**
+   * 数字を英語の読み方に直す（2026-11-18）。発音評価はお手本の「7:00」と話した「seven」を同じ語と見なさず、
+   * 言い落とし・余分な語になるため、お手本の音声と採点の両方をこの読み方にそろえる。
+   * 時刻 7:00→seven o'clock（a.m./p.m. が続くときは seven）、2:30→two thirty、7:05→seven oh five、
+   * 3桁（部屋番号など）204→two oh four、300→three hundred、年 2026→twenty twenty-six、それ以外は普通の読み方
+   */
+  const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+  const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+  function numWords(n) {
+    n = Math.floor(n);
+    if (n < 20) return ONES[n];
+    if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? "-" + ONES[n % 10] : "");
+    if (n < 1000) return ONES[Math.floor(n / 100)] + " hundred" + (n % 100 ? " " + numWords(n % 100) : "");
+    if (n < 1000000) return numWords(Math.floor(n / 1000)) + " thousand" + (n % 1000 ? " " + numWords(n % 1000) : "");
+    return String(n);
+  }
+  const pair = (n) => (n === 0 ? "hundred" : n < 10 ? "oh " + ONES[n] : numWords(n));
+  function speakNumbers(text) {
+    return String(text || "")
+      .replace(/\b(\d{1,2}):(\d{2})\b(\s*[ap]\.?\s?m\b\.?)?/gi, (_, h, m, ap) => {
+        const mm = +m, hh = numWords(+h);
+        const t = mm === 0 ? (ap ? hh : hh + " o'clock") : hh + " " + (mm < 10 ? "oh " + ONES[mm] : numWords(mm));
+        return ap ? t + " " + ap.trim() : t;
+      })
+      .replace(/\b\d{1,3}(,\d{3})+\b|\b\d+\b/g, (x) => {
+        const n = +x.replace(/,/g, "");
+        if (x.includes(",")) return numWords(n);
+        if (x.length === 4 && n >= 1100 && n <= 2099 && n % 100 !== 0 && !(n >= 2000 && n < 2010)) return numWords(Math.floor(n / 100)) + " " + pair(n % 100);
+        if (x.length === 3 && n % 100 !== 0) return ONES[Math.floor(n / 100)] + " " + pair(n % 100);
+        return numWords(n);
+      });
+  }
+
   /* ---------- 単語の発音練習：シャドーイングでつまずいた単語を、単語だけで評価する ---------- */
-  const normWord = (s) => String(s || "").toLowerCase().replace(/[^a-z']/g, "");
+  // 数字も残す（「204」「2:30」のような語を練習できるように。2026-11-18）
+  const normWord = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9']/g, "");
   /**
    * r：parsePron の結果（お手本はその単語1語）。合格は、その単語が採点の厳しさで「良い」（ok）のとき。
    * 流暢さ・完全さは1語では意味が薄いので使わない。
@@ -895,5 +929,5 @@
     return BADGES.map(([id, name, desc, key, goal]) => { const cur = Math.max(0, +((c || {})[key]) || 0); return { id, name, desc, cur: Math.min(cur, goal), goal, done: cur >= goal }; });
   }
 
-  return { retentionWeeks, habitMonth, BADGES, badgeStatus, cmpVersion, parseChangelog, newerVersions, addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, prosodyNotes, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
+  return { retentionWeeks, habitMonth, BADGES, badgeStatus, cmpVersion, parseChangelog, newerVersions, addDays, weekOf, HABIT_KEEP, habitRings, habitCounts, habitScan, habitWeek, habitFold, PAUSE_NEW_AT, capNew, isReverse, cloze, meaningChoices, exampleChoices, wordMode, matchSpoken, DAY, startOfDay, ymd, weekStart, recordRetention, retentionSummary, nextState, applyTalkUse, pickSpacedWords, weakSounds, dictTokens, dictationDiff, dictationGrade, interleave, buildQueue, gradeFromScore, parsePron, prosodyNotes, wordClass, judgeScore, pronFeedback, wordDrill, drillChunk, speakNumbers, trimSilence, TOOL_KINDS, CONV_TOOLS, toolsUsed, isClarify, audioProfile, PHONEME_TIPS, PHONEME_GUIDE, normPh, guideFor, tipFor, contrastTip, STRICTNESS };
 });
