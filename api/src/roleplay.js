@@ -140,6 +140,23 @@ function cleanHint(o) {
 }
 
 /** 1日の上限を数えるキー（日本時間の日付） */
+/** 相手役の返事に訳が付かなかったとき（AI が reply_ja を返し忘れる）に、押した分だけ訳を作る（2026-11-18） */
+function jaMessages(scene, text) {
+  return [
+    {
+      role: "system",
+      content:
+        "You translate one line from an English role-play for a Japanese learner. " +
+        "Give one natural Japanese translation that fits spoken conversation. Keep product names in English. " +
+        'Return only JSON: {"ja": "..."}',
+    },
+    { role: "user", content: `Scene: ${clip(scene.title, 60)}\nLine: ${clip(text, 300)}` },
+  ];
+}
+function cleanJa(o) {
+  const ja = clip(o && o.ja, 200);
+  return { ja: /[\u3040-\u30ff\u4e00-\u9fff]/.test(ja) ? ja : null };
+}
 function usageKey(now = Date.now()) {
   const j = new Date(now + 9 * 3600 * 1000);
   return `roleplay-${j.getUTCFullYear()}${String(j.getUTCMonth() + 1).padStart(2, "0")}${String(j.getUTCDate()).padStart(2, "0")}`;
@@ -174,7 +191,11 @@ function prepare(b) {
     if (!clip(b.ja, 200)) return { error: "ja" };
     return { scene, history, messages: hintMessages(scene, history, b.ja), maxTokens: 400, clean: cleanHint };
   }
+  if (b.action === "ja") {
+    if (!clip(b.text, 300)) return { error: "text" };
+    return { scene, history, messages: jaMessages(scene, b.text), maxTokens: 300, clean: cleanJa };
+  }
   return { error: "action" };
 }
 
-module.exports = { prepare, cleanTurn, cleanReview, cleanHint, cleanTargetsUsed, usageKey, logPartition, MAX_TURNS, myTurns };
+module.exports = { prepare, cleanJa, cleanTurn, cleanReview, cleanHint, cleanTargetsUsed, usageKey, logPartition, MAX_TURNS, myTurns };

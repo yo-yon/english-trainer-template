@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = window.SRS;
-const APP_VERSION = "0.29.0";
+const APP_VERSION = "0.29.1";
 try { document.getElementById("app-ver").textContent = "v" + APP_VERSION; } catch (e) {}
 const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SLOW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="3"/></svg>';
@@ -220,6 +220,7 @@ function countTts(n) {
 async function say(text, rate) {
   unlockAudio();
   const rk = rateKey(rate);
+  text = S.speakNumbers(text); // お手本の読み方を採点と同じにそろえる
   const key = `${(tokenCache && tokenCache.voice) || "ava"}|${rk}|${text}`;
   try {
     if (!audioCtx || !window.SpeechSDK) throw new Error("no_audio");
@@ -471,6 +472,7 @@ function renderShadow() {
     <div class="row between"><span class="chip">${c ? "復習" : "新しい文"} · ${esc(s.scene || "")}${rc === "ok" ? " · ✓ 思い出せた" : rc === "ng" ? " · もう一度覚える" : ""}</span>
       <span class="row" style="gap:8px"><span class="note">${c && c.best != null ? "最高 " + c.best + "点" : ""}</span><button class="fbbtn" data-fb="sentence" aria-label="この文の内容や評価を報告">👎</button></span></div>
     <p class="sent ${hide ? "hidden" : ""}" id="sent-text">${esc(s.text)}</p>
+    ${!hide && S.speakNumbers(s.text) !== s.text ? `<p class="note" style="margin:-6px 0 0">読み方：${esc(S.speakNumbers(s.text))}</p>` : ""}
     ${sShowJa ? `<p class="tr" style="margin:-6px 0 0">${s.ja ? esc(s.ja) : jaPending.has(s.id) ? '<span class="note">訳を作っています…</span>' : '<span class="note">訳がありません</span>'}</p>` : ""}
     <div class="row">
       <button class="btn" data-say="${esc(s.text)}">${SPK}お手本</button>
@@ -566,9 +568,9 @@ function guideHTML(g, { fix = "", heard = "", ph = "", open = true } = {}) {
    そこで前後の語ごと（2〜4語）言ってもらい、採点はその単語だけにする。合格は、その単語が採点の厳しさで「良い」になったとき。
    話された音の候補（nBestPhonemeCount）から、どの音に聞こえたかも示す。単語の記録は発音の記録（attempts）には入れない */
 function startDrill(word) {
-  const w = String(word || "").replace(/[^A-Za-z'\-]/g, "");
+  const w = String(word || "").replace(/[^A-Za-z0-9'\-:.]/g, "").replace(/^[.:]+|[.:]+$/g, "");
   if (!w || !sCur || recording) return;
-  drill = { sid: sCur.id, w, chunk: S.drillChunk(sCur.text, w), res: null, tries: 0, passes: 0, msg: "" };
+  drill = { sid: sCur.id, w, chunk: S.drillChunk(S.speakNumbers(sCur.text), w), res: null, tries: 0, passes: 0, msg: "" };
   renderShadow();
   // 改善点のボタンから開いたときは、練習の枠が画面の下にあるので見える位置まで動かす
   const box = document.querySelector("#view-shadow .drill");
@@ -603,10 +605,10 @@ async function drillRecord() {
 }
 // まとまりの中の練習する単語を太字にする
 function chunkHTML(chunk, w) {
-  const t = String(w).toLowerCase().replace(/[^a-z']/g, "");
+  const t = String(w).toLowerCase().replace(/[^a-z0-9']/g, "");
   let done = false;
   return String(chunk).split(/\s+/).map((x) => {
-    if (!done && x.toLowerCase().replace(/[^a-z']/g, "") === t) { done = true; return `<b><u>${esc(x)}</u></b>`; }
+    if (!done && x.toLowerCase().replace(/[^a-z0-9']/g, "") === t) { done = true; return `<b><u>${esc(x)}</u></b>`; }
     return esc(x);
   }).join(" ");
 }
@@ -951,7 +953,8 @@ async function assessOnce(refText, opts = {}) {
     // 普段は「話し終わった」ボタンで入力を閉じるので、この 3 秒を待つことはない
     cfg.setProperty(SDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, "3000");
     const audio = SDK.AudioConfig.fromStreamInput(push);
-    const pa = paConfig(SDK, refText, opts.nbestPhonemes, opts.prosody);
+    // 数字は読み方に直してから渡す（「7:00」のままだと、話した「seven」が言い落とし扱いになる。2026-11-18）
+    const pa = paConfig(SDK, S.speakNumbers(refText), opts.nbestPhonemes, opts.prosody);
     recognizer = new SDK.SpeechRecognizer(cfg, audio);
     pa.applyTo(recognizer);
     // 1文30秒以内。万一終わらないときは 35 秒で入力を閉じて結果を受け取る
@@ -1111,8 +1114,8 @@ async function renderTalk() {
   const bubbles = talk.history.map((t, i) => t.who === "ai"
     ? `<div class="bubble ai"><div class="${t.shown ? "" : "veil"}" ${t.shown ? "" : 'aria-label="文字は隠れています"'}>${esc(t.text)}</div>
         <div class="tools"><button class="iconbtn" data-say="${esc(t.text)}" aria-label="もう一度聞く">${SPK}</button><button class="iconbtn" data-say="${esc(t.text)}" data-rate="0.7" aria-label="ゆっくり聞く">${SLOW}</button><button class="linkbtn" data-say="${esc(t.text)}" data-rate="0.5">さらにゆっくり</button>
-        ${t.shown ? "" : `<button class="linkbtn" data-reveal="${i}">文字を見る</button>`}${t.ja ? `<button class="linkbtn" data-talk-ja="${i}" aria-expanded="${t.jaShown ? "true" : "false"}">${t.jaShown ? "訳を隠す" : "訳を見る"}</button>` : ""}</div>
-        ${t.ja && t.jaShown ? `<p class="tr" style="margin:4px 0 0">${esc(t.ja)}</p>` : ""}
+        ${t.shown ? "" : `<button class="linkbtn" data-reveal="${i}">文字を見る</button>`}<button class="linkbtn" data-talk-ja="${i}" aria-expanded="${t.jaShown ? "true" : "false"}" ${t.jaBusy ? "disabled" : ""}>${t.jaBusy ? "訳を作っています…" : t.jaShown ? "訳を隠す" : "訳を見る"}</button></div>
+        ${t.jaShown ? `<p class="tr" style="margin:4px 0 0">${t.ja ? esc(t.ja) : '<span class="note">訳を作れませんでした。もう一度「訳を見る」を押してください。</span>'}</p>` : ""}
         ${t.help ? `<p class="help">💡 ${esc(t.help)}</p>` : ""}</div>`
     : `<div class="bubble me">${esc(t.text)}${t.pcm ? `<div class="tools"><button class="iconbtn mine" data-mine="${i}" aria-label="自分の声を聞く">🎧</button></div>` : ""}</div>`).join("");
   v.innerHTML = `<article class="card talk">
@@ -1143,7 +1146,7 @@ async function renderTalk() {
   $("talk-review").onclick = talkReview;
   v.querySelectorAll("[data-reveal]").forEach((b) => (b.onclick = () => { talk.history[+b.dataset.reveal].shown = true; renderTalk(); }));
   v.querySelectorAll("[data-mine]").forEach((b) => (b.onclick = () => playMine(talk.history[+b.dataset.mine].pcm)));
-  v.querySelectorAll("[data-talk-ja]").forEach((b) => (b.onclick = () => { const t = talk.history[+b.dataset.talkJa]; t.jaShown = !t.jaShown; renderTalk(); }));
+  v.querySelectorAll("[data-talk-ja]").forEach((b) => (b.onclick = () => talkJa(+b.dataset.talkJa)));
   const log = v.querySelector(".talk-log"); if (log && log.lastElementChild) log.lastElementChild.scrollIntoView({ block: "nearest" });
 }
 
@@ -1219,6 +1222,16 @@ function startTalk(id) {
   say(sc.opener, 0.9);
 }
 
+// 訳を見る：AI が返事の訳（reply_ja）を返し忘れたときは、押したときに訳だけ作る（2026-11-18）
+async function talkJa(i) {
+  const t = talk && talk.history[i];
+  if (!t || t.jaBusy) return;
+  if (t.ja || t.jaShown) { t.jaShown = !t.jaShown; renderTalk(); return; }
+  t.jaBusy = true; renderTalk();
+  try { const r = await talkApi({ action: "ja", text: t.text }); t.ja = (r && r.ja) || ""; } catch (e) {}
+  t.jaBusy = false; t.jaShown = true;
+  if (talk && talk.history[i] === t) renderTalk();
+}
 async function talkApi(body) {
   try {
     const scene = { ...talk.scene, targets: talk.targets, twist: talk.twist, persona: talk.persona };
